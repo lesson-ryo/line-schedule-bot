@@ -95,10 +95,22 @@ git push -u origin main
 
 無料プランではShellが使えないため、以下のURLにブラウザでアクセスするだけで操作します。`YOUR_TOKEN` の部分は手順3で設定した `ADMIN_TOKEN` の値に置き換えてください。このURLは合言葉（トークン）を含むので、他人に共有しないでください。
 
+**登録メンバー一覧を確認する**（送信先を絞りたいときに使う番号を確認）
+
+```
+https://your-app.onrender.com/admin/members?token=YOUR_TOKEN
+```
+
 **日程候補を送信する**（候補は `|` 区切りで指定。日本語や記号も使えます）
 
 ```
 https://your-app.onrender.com/admin/send?token=YOUR_TOKEN&candidates=8/5(水) 14:00-|8/6(木) 10:00-|8/7(金) 15:00-
+```
+
+全員ではなく特定のメンバーだけに送りたい場合は、`/admin/members` で確認した番号を `&to=` で指定してください（カンマ区切りで複数指定可）。
+
+```
+https://your-app.onrender.com/admin/send?token=YOUR_TOKEN&candidates=8/5(水) 14:00-|8/6(木) 10:00-&to=1,3
 ```
 
 **投票を集計する**（メンバーがボタンをタップした後にアクセス）

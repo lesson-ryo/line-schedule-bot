@@ -116,9 +116,20 @@ def check_admin_token():
         abort(403)
 
 
+@app.route("/admin/members", methods=["GET"])
+def admin_members():
+    """?token=... にアクセスすると登録メンバー一覧を番号付きで表示する（送信先を絞るときに使う番号）"""
+    check_admin_token()
+    from schedule_tools import list_members
+
+    result = list_members()
+    return f"<pre>{result}</pre>"
+
+
 @app.route("/admin/send", methods=["GET"])
 def admin_send():
-    """?token=...&candidates=候補1|候補2|候補3 の形式でアクセスすると日程候補を一斉送信する"""
+    """?token=...&candidates=候補1|候補2|候補3 の形式でアクセスすると日程候補を一斉送信する。
+    &to=1,3 のように/admin/membersで確認した番号を指定すると送信先を絞り込める（省略時は全員）。"""
     check_admin_token()
     from schedule_tools import send_schedule
 
@@ -126,7 +137,11 @@ def admin_send():
     candidates = [c.strip() for c in candidates_raw.split("|") if c.strip()]
     if not candidates:
         return "候補が指定されていません。?candidates=候補1|候補2|候補3 の形式で指定してください。", 400
-    result = send_schedule(candidates)
+
+    to_raw = request.args.get("to", "")
+    member_indices = [int(x) for x in to_raw.split(",") if x.strip().isdigit()] or None
+
+    result = send_schedule(candidates, member_indices)
     return f"<pre>{result}</pre>"
 
 

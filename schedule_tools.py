@@ -7,8 +7,14 @@
 
 使い方（デプロイしたサーバーと同じ環境変数を設定した上で、手元やRenderのShellから実行）:
 
+  # 0) 送信先を絞りたい場合、まず登録メンバーの番号を確認する
+  python schedule_tools.py members
+
   # 1) 登録済み全メンバーに日程候補ボタン付きメッセージを送る（候補は1つずつ引数で渡す）
   python schedule_tools.py send "8/5(水) 14:00-" "8/6(木) 10:00-" "8/7(金) 15:00-"
+
+  # 1') 特定のメンバーだけに送りたい場合（membersで確認した番号を --to で指定、カンマ区切り）
+  python schedule_tools.py send "8/5(水) 14:00-" "8/6(木) 10:00-" --to 1,3
 
   # 2) メンバーがボタンをタップしたら、溜まった投票を集計する
   python schedule_tools.py summarize
@@ -89,11 +95,31 @@ def build_flex_contents(candidates: list[str]) -> dict:
     }
 
 
-def send_schedule(candidates: list[str]) -> str:
-    """membersに登録されている全員に日程候補ボタン付きメッセージをPush送信する（Push APIなので無料通数を消費）"""
+def list_members() -> str:
+    """登録メンバーに番号を振って一覧表示する（送信先を絞り込むときに使う番号）"""
+    members = load_json(MEMBERS_FILE)
+    if not members:
+        return "メンバーがまだ登録されていません。先にLINE公式アカウントを友だち追加してもらってください。"
+
+    lines = ["=== 登録メンバー一覧 ===", ""]
+    for i, m in enumerate(members, start=1):
+        lines.append(f"{i}. {m['display_name']}")
+    return "\n".join(lines)
+
+
+def send_schedule(candidates: list[str], member_indices: list[int] | None = None) -> str:
+    """日程候補ボタン付きメッセージをPush送信する（Push APIなので無料通数を消費）。
+    member_indices を指定すると list_members() の番号で送信先を絞り込める。省略時は全員に送信。"""
     members = load_json(MEMBERS_FILE)
     if not members:
         return "membersが空です。先にLINE公式アカウントを友だち追加してもらってください。"
+
+    if member_indices:
+        target_members = [members[i - 1] for i in member_indices if 0 < i <= len(members)]
+        if not target_members:
+            return f"指定されたメンバー番号が見つかりません（登録は{len(members)}人です。list_membersで確認してください）。"
+    else:
+        target_members = members
 
     save_json(CANDIDATES_FILE, candidates)
 
@@ -105,11 +131,12 @@ def send_schedule(candidates: list[str]) -> str:
 
     with ApiClient(configuration) as api_client:
         line_api = MessagingApi(api_client)
-        for m in members:
+        for m in target_members:
             line_api.push_message(
                 PushMessageRequest(to=m["user_id"], messages=[flex_message])
             )
-    return f"{len(members)}人に日程候補（タップ式）を送信しました。\n候補: {candidates}"
+    names = [m["display_name"] for m in target_members]
+    return f"{len(target_members)}人に日程候補（タップ式）を送信しました。\n送信先: {names}\n候補: {candidates}"
 
 
 def summarize_replies() -> str:
@@ -153,11 +180,20 @@ if __name__ == "__main__":
 
     command = sys.argv[1]
 
-    if command == "send":
-        if len(sys.argv) < 3:
+    if command == "members":
+        print(list_members())
+    elif command == "send":
+        rest = sys.argv[2:]
+        member_indices = None
+        if "--to" in rest:
+            idx = rest.index("--to")
+            to_value = rest[idx + 1]
+            member_indices = [int(x) for x in to_value.split(",") if x.strip()]
+            rest = rest[:idx] + rest[idx + 2:]
+        if not rest:
             print("送信する候補日程を1つ以上指定してください。")
             sys.exit(1)
-        print(send_schedule(sys.argv[2:]))
+        print(send_schedule(rest, member_indices))
     elif command == "summarize":
         print(summarize_replies())
     elif command == "reset":
