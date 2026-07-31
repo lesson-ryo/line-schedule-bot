@@ -259,14 +259,22 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   input[type=date], input[type=text] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
   button { padding: 9px 14px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; background: #06C755; color: #fff; }
   button.sub { background: #eee; color: #333; }
-  button.danger { background: #fff; color: #c00; border: 1px solid #e0b4b4; padding: 2px 8px; font-size: 12px; }
-  .chip { display: inline-flex; align-items: center; gap: 6px; background: #f0f9f3; border: 1px solid #b6e2c6; border-radius: 20px; padding: 5px 12px; font-size: 13px; margin: 3px 3px 0 0; }
+  button.mini { background: #eee; color: #444; padding: 4px 10px; font-size: 12px; }
+  button.danger { background: #fff; color: #c00; border: 1px solid #e0b4b4; padding: 3px 9px; font-size: 12px; }
+  .dateblock { border: 1px solid #e6e6e6; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: #fff; }
+  .dateblock.empty { background: #fcfcfc; border-style: dashed; }
+  .datehead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .datename { font-weight: 600; font-size: 15px; }
+  .datename .n { font-weight: normal; font-size: 12px; color: #888; margin-left: 8px; }
   .slot { display: inline-block; }
   .slot input { display: none; }
-  .slot span { display: inline-block; padding: 7px 12px; border: 1px solid #ccc; border-radius: 20px; font-size: 13px; cursor: pointer; margin: 3px 3px 0 0; background: #fff; }
+  .slot span { display: inline-block; padding: 6px 11px; border: 1px solid #ccc; border-radius: 20px; font-size: 13px; cursor: pointer; margin: 3px 3px 0 0; background: #fff; }
   .slot input:checked + span { background: #06C755; color: #fff; border-color: #06C755; }
-  #preview { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow-y: auto; }
-  #preview li { display: flex; justify-content: space-between; align-items: center; padding: 7px 4px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  .bulk { background: #f6f8fa; border: 1px solid #e2e6ea; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+  .bulk .lbl { font-size: 13px; color: #555; margin-bottom: 4px; }
+  #preview { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
+  #preview li { padding: 6px 4px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  #preview li.head { font-weight: 600; color: #06783b; background: #f6fbf8; border-bottom: none; padding-top: 10px; }
   .muted { color: #888; font-size: 13px; }
   #result { margin-top: 10px; padding: 12px; border-radius: 8px; white-space: pre-wrap; font-size: 13px; display: none; }
   #result.ok { background: #f0f9f3; border: 1px solid #b6e2c6; display: block; }
@@ -278,26 +286,34 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <body>
 <h1>日程調整Bot 管理画面</h1>
 
-<h2>1. 日付を選ぶ</h2>
+<h2>1. 日付を追加する</h2>
 <div class="card">
   <div class="row">
     <input type="date" id="dateInput">
     <button class="sub" onclick="addDate()">日付を追加</button>
     <button class="sub" onclick="addWeekdays()">今後2週間の平日を一括追加</button>
   </div>
-  <div id="dateChips" style="margin-top:10px"></div>
 </div>
 
-<h2>2. 時間帯を選ぶ（複数可）</h2>
+<h2>2. 日付ごとに時間帯を選ぶ</h2>
 <div class="card">
-  <div id="slots"></div>
-  <div class="row" style="margin-top:12px">
-    <input type="text" id="customSlot" placeholder="例: 18:30-20:00">
-    <button class="sub" onclick="addCustomSlot()">時間帯を追加</button>
+  <div class="bulk">
+    <div class="lbl">一括操作（下で選んだ時間帯をまとめて反映できます）</div>
+    <div id="bulkSlots"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="mini" onclick="applyBulk('set')">全日付をこの内容にする</button>
+      <button class="mini" onclick="applyBulk('add')">全日付に追加する</button>
+      <button class="mini" onclick="clearAllSlots()">全日付の時間帯をクリア</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="customSlot" placeholder="例: 18:30-20:00">
+      <button class="mini" onclick="addCustomSlot()">選択肢に時間帯を追加</button>
+    </div>
   </div>
+  <div id="dateBlocks"></div>
 </div>
 
-<h2>3. 候補リストのプレビュー</h2>
+<h2>3. 送信内容のプレビュー</h2>
 <div class="card">
   <div class="muted" id="count">候補: 0件</div>
   <ul id="preview"></ul>
@@ -324,55 +340,99 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
-const DEFAULT_SLOTS = ['10:00-', '11:00-', '13:00-', '14:00-', '15:00-', '16:00-', '18:00-', '19:00-'];
-let dates = [];
-let slots = DEFAULT_SLOTS.map(s => ({ label: s, checked: false }));
 const WD = ['日','月','火','水','木','金','土'];
+let slotOptions = ['10:00-', '11:00-', '13:00-', '14:00-', '15:00-', '16:00-', '18:00-', '19:00-'];
+let bulkSel = [];
+let dates = [];   // [{ d: '2026-08-03', slots: ['10:00-'] }]
 
 function fmt(d) {
   const dt = new Date(d + 'T00:00:00');
   return (dt.getMonth() + 1) + '/' + dt.getDate() + '(' + WD[dt.getDay()] + ')';
 }
+function sortDates() { dates.sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0); }
 function addDate() {
   const v = document.getElementById('dateInput').value;
-  if (v && !dates.includes(v)) { dates.push(v); dates.sort(); render(); }
+  if (v && !dates.some(x => x.d === v)) {
+    dates.push({ d: v, slots: bulkSel.slice() });
+    sortDates(); render();
+  }
 }
 function addWeekdays() {
   const today = new Date();
   for (let i = 1; i <= 14; i++) {
-    const d = new Date(today); d.setDate(today.getDate() + i);
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
-    const s = d.toISOString().slice(0, 10);
-    if (!dates.includes(s)) dates.push(s);
+    const dt = new Date(today); dt.setDate(today.getDate() + i);
+    if (dt.getDay() === 0 || dt.getDay() === 6) continue;
+    const s = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    if (!dates.some(x => x.d === s)) dates.push({ d: s, slots: bulkSel.slice() });
   }
-  dates.sort(); render();
+  sortDates(); render();
 }
-function removeDate(d) { dates = dates.filter(x => x !== d); render(); }
+function removeDate(d) { dates = dates.filter(x => x.d !== d); render(); }
+function toggleSlot(d, label, on) {
+  const item = dates.find(x => x.d === d);
+  if (!item) return;
+  if (on) { if (!item.slots.includes(label)) item.slots.push(label); }
+  else { item.slots = item.slots.filter(s => s !== label); }
+  render();
+}
+function toggleBulk(label, on) {
+  if (on) { if (!bulkSel.includes(label)) bulkSel.push(label); }
+  else { bulkSel = bulkSel.filter(s => s !== label); }
+  render();
+}
+function applyBulk(mode) {
+  if (!dates.length) { alert('先に日付を追加してください。'); return; }
+  if (!bulkSel.length) { alert('一括操作エリアで時間帯を選んでください。'); return; }
+  dates.forEach(x => {
+    if (mode === 'set') x.slots = bulkSel.slice();
+    else bulkSel.forEach(s => { if (!x.slots.includes(s)) x.slots.push(s); });
+  });
+  render();
+}
+function clearAllSlots() { dates.forEach(x => x.slots = []); render(); }
 function addCustomSlot() {
   const el = document.getElementById('customSlot');
   const v = el.value.trim();
-  if (v && !slots.some(s => s.label === v)) { slots.push({ label: v, checked: true }); el.value = ''; render(); }
+  if (v && !slotOptions.includes(v)) { slotOptions.push(v); el.value = ''; render(); }
 }
+function ordered(slots) { return slotOptions.filter(s => slots.includes(s)); }
 function candidates() {
-  const chosen = slots.filter(s => s.checked).map(s => s.label);
   const out = [];
-  for (const d of dates) for (const t of chosen) out.push(fmt(d) + ' ' + t);
+  for (const x of dates) for (const t of ordered(x.slots)) out.push(fmt(x.d) + ' ' + t);
   return out;
 }
 function render() {
-  document.getElementById('dateChips').innerHTML = dates.length
-    ? dates.map(d => `<span class="chip">${fmt(d)}<button class="danger" onclick="removeDate('${d}')">×</button></span>`).join('')
-    : '<span class="muted">まだ日付が選ばれていません</span>';
-
-  document.getElementById('slots').innerHTML = slots.map((s, i) =>
-    `<label class="slot"><input type="checkbox" ${s.checked ? 'checked' : ''} onchange="slots[${i}].checked=this.checked;render()"><span>${s.label}</span></label>`
+  document.getElementById('bulkSlots').innerHTML = slotOptions.map(s =>
+    `<label class="slot"><input type="checkbox" ${bulkSel.includes(s) ? 'checked' : ''} onchange="toggleBulk('${s}', this.checked)"><span>${s}</span></label>`
   ).join('');
+
+  document.getElementById('dateBlocks').innerHTML = dates.length
+    ? dates.map(x => `
+        <div class="dateblock ${x.slots.length ? '' : 'empty'}">
+          <div class="datehead">
+            <span class="datename">${fmt(x.d)}<span class="n">${x.slots.length ? x.slots.length + '件' : '時間帯なし（送信されません）'}</span></span>
+            <button class="danger" onclick="removeDate('${x.d}')">この日を削除</button>
+          </div>
+          <div>${slotOptions.map(s =>
+            `<label class="slot"><input type="checkbox" ${x.slots.includes(s) ? 'checked' : ''} onchange="toggleSlot('${x.d}', '${s}', this.checked)"><span>${s}</span></label>`
+          ).join('')}</div>
+        </div>`).join('')
+    : '<span class="muted">まだ日付が追加されていません。上の「日付を追加」から追加してください。</span>';
 
   const list = candidates();
   document.getElementById('count').textContent = '候補: ' + list.length + '件';
-  document.getElementById('preview').innerHTML = list.length
-    ? list.map((c, i) => `<li><span>${i + 1}. ${c}</span></li>`).join('')
-    : '<li class="muted">日付と時間帯を選ぶとここに表示されます</li>';
+  if (!list.length) {
+    document.getElementById('preview').innerHTML = '<li class="muted">日付と時間帯を選ぶとここに表示されます</li>';
+    return;
+  }
+  let html = '', n = 0;
+  for (const x of dates) {
+    const os = ordered(x.slots);
+    if (!os.length) continue;
+    html += `<li class="head">${fmt(x.d)}</li>`;
+    for (const t of os) { n++; html += `<li>${n}. ${fmt(x.d)} ${t}</li>`; }
+  }
+  document.getElementById('preview').innerHTML = html;
 }
 function toggleAll(on) {
   document.querySelectorAll('#members input[type=checkbox]').forEach(cb => cb.checked = on);
@@ -397,7 +457,7 @@ async function loadMembers() {
 async function send() {
   const list = candidates();
   const box = document.getElementById('result');
-  if (!list.length) { box.className = 'err'; box.textContent = '候補が0件です。日付と時間帯を選んでください。'; return; }
+  if (!list.length) { box.className = 'err'; box.textContent = '候補が0件です。日付ごとに時間帯を選んでください。'; return; }
   const to = Array.from(document.querySelectorAll('#members input[type=checkbox]:checked')).map(cb => cb.value);
   if (!to.length) { box.className = 'err'; box.textContent = '送信先が選ばれていません。'; return; }
   if (!confirm(list.length + '件の候補を' + to.length + '人に送信します。よろしいですか？')) return;
