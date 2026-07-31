@@ -10,6 +10,10 @@ Renderの無料プランはディスクを保持しないため、15分操作が
 未設定の場合はローカルの.jsonファイルにフォールバックする（ローカル開発用）。
 
 app.py / schedule_tools.py はどちらもここの load_json / save_json を使う。
+
+複数のBot（例: 関西用と関東用）で同じUpstashを共有する場合は、環境変数
+STORAGE_PREFIX に "kanto:" のような接頭辞を設定すると、キーが分離されて
+データが混ざらない。未設定なら接頭辞なし（既存データをそのまま使える）。
 """
 
 import os
@@ -20,12 +24,18 @@ import requests
 
 UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+PREFIX = os.environ.get("STORAGE_PREFIX", "")
 
 BASE_DIR = Path(__file__).parent
 
 
 def _using_upstash() -> bool:
     return bool(UPSTASH_URL and UPSTASH_TOKEN)
+
+
+def _key(key: str) -> str:
+    """STORAGE_PREFIXが設定されていれば付与する（Bot間でデータを分離するため）"""
+    return f"{PREFIX}{key}" if PREFIX else key
 
 
 def _redis_command(*args):
@@ -41,22 +51,26 @@ def _redis_command(*args):
 
 def load_json(key: str, default=None):
     """key: 'members' / 'votes' / 'candidates' のような文字列。"""
+    name = _key(key)
+
     if _using_upstash():
-        raw = _redis_command("GET", key)
+        raw = _redis_command("GET", name)
         if raw is None:
             return default if default is not None else []
         return json.loads(raw)
 
-    path = BASE_DIR / f"{key}.json"
+    path = BASE_DIR / f"{name.replace(':', '_')}.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return default if default is not None else []
 
 
 def save_json(key: str, data):
+    name = _key(key)
+
     if _using_upstash():
-        _redis_command("SET", key, json.dumps(data, ensure_ascii=False))
+        _redis_command("SET", name, json.dumps(data, ensure_ascii=False))
         return
 
-    path = BASE_DIR / f"{key}.json"
+    path = BASE_DIR / f"{name.replace(':', '_')}.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
