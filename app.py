@@ -33,6 +33,8 @@ CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 LIFF_ID = os.environ.get("LIFF_ID", "")
 LINE_CHANNEL_ID = os.environ.get("LINE_CHANNEL_ID", "")
+# 管理画面の見出しに表示する名前（関西用・関東用など複数運用時の見分け用）
+PANEL_NAME = os.environ.get("PANEL_NAME", "日程調整Bot")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -248,7 +250,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>日程調整Bot 管理画面</title>
+<title>__PANEL_NAME__ 管理画面</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #222; background: #fafafa; }
@@ -293,7 +295,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>日程調整Bot 管理画面</h1>
+<h1>__PANEL_NAME__ 管理画面</h1>
 
 <h2>1. 候補の時間をドラッグで選ぶ</h2>
 <div class="card">
@@ -552,7 +554,7 @@ loadMembers();
 def admin_panel():
     """管理者用の入力フォーム。日付と時間帯を選ぶだけで候補リストを組み立てて送信できる。"""
     check_admin_token()
-    return ADMIN_PANEL_HTML
+    return ADMIN_PANEL_HTML.replace("__PANEL_NAME__", PANEL_NAME)
 
 
 @app.route("/admin/members.json", methods=["GET"])
