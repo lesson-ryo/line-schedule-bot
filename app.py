@@ -256,11 +256,21 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   h2 { font-size: 15px; margin: 24px 0 8px; padding-bottom: 6px; border-bottom: 2px solid #06C755; }
   .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 16px; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  input[type=date] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-  button, .btn { padding: 9px 14px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; background: #06C755; color: #fff; text-decoration: none; display: inline-block; }
+  button { padding: 9px 14px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; background: #06C755; color: #fff; }
   button.sub { background: #eee; color: #333; }
-  .btn.cal { background: #1a73e8; }
   button.mini { background: #eee; color: #444; padding: 4px 10px; font-size: 12px; }
+  .calhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; font-size: 15px; }
+  .calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .calgrid .wd { text-align: center; font-size: 12px; color: #888; padding: 4px 0; }
+  .calgrid .wd.sat { color: #3b7dd8; }
+  .calgrid .wd.sun { color: #d84b4b; }
+  .day { padding: 9px 0; text-align: center; font-size: 14px; border: 1px solid #e4e4e4; border-radius: 8px; background: #fff; cursor: pointer; user-select: none; }
+  .day:hover { border-color: #06C755; }
+  .day.sel { background: #06C755; color: #fff; border-color: #06C755; font-weight: 600; }
+  .day.today { border-color: #06C755; border-width: 2px; }
+  .day.past { color: #c8c8c8; background: #fafafa; cursor: default; }
+  .day.past:hover { border-color: #e4e4e4; }
+  .day.blank { border: none; background: none; cursor: default; }
   button.danger { background: #fff; color: #c00; border: 1px solid #e0b4b4; padding: 3px 9px; font-size: 12px; }
   .dateblock { border: 1px solid #e6e6e6; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
   .dateblock.empty { background: #fcfcfc; border-style: dashed; }
@@ -286,16 +296,18 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <body>
 <h1>日程調整Bot 管理画面</h1>
 
-<h2>1. 日付を追加する</h2>
+<h2>1. 日付を選ぶ</h2>
 <div class="card">
-  <div class="row">
-    <a class="btn cal" href="https://calendar.google.com/" target="_blank" rel="noopener">Googleカレンダーを開く</a>
-    <span class="muted">カレンダーを見ながら、下で候補日を追加してください</span>
+  <div class="calhead">
+    <button class="mini" onclick="moveMonth(-1)">‹ 前の月</button>
+    <span id="calTitle"></span>
+    <button class="mini" onclick="moveMonth(1)">次の月 ›</button>
   </div>
+  <div class="calgrid" id="calWeekdays"></div>
+  <div class="calgrid" id="calDays"></div>
   <div class="row" style="margin-top:12px">
-    <input type="date" id="dateInput">
-    <button class="sub" onclick="addDate()">日付を追加</button>
     <button class="sub" onclick="addWeekdays()">今後2週間の平日を追加</button>
+    <button class="sub" onclick="clearDates()">選択をすべて解除</button>
   </div>
 </div>
 
@@ -345,6 +357,7 @@ const WD = ['日','月','火','水','木','金','土'];
 const SLOTS = Array.from({ length: 15 }, (_, i) => String(i + 8).padStart(2, '0') + ':00');
 let bulkSel = [];
 let dates = [];   // [{ d: '2026-08-03', slots: ['10:00'] }]
+let view = new Date();   // カレンダーで表示中の月
 
 function fmt(d) {
   const dt = new Date(d + 'T00:00:00');
@@ -354,10 +367,38 @@ function ymd(dt) {
   return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
 }
 function sortDates() { dates.sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0); }
-function addDate() {
-  const v = document.getElementById('dateInput').value;
-  if (!v) return;
-  if (!dates.some(x => x.d === v)) { dates.push({ d: v, slots: bulkSel.slice() }); sortDates(); render(); }
+function toggleDate(d) {
+  if (dates.some(x => x.d === d)) dates = dates.filter(x => x.d !== d);
+  else { dates.push({ d: d, slots: bulkSel.slice() }); sortDates(); }
+  render();
+}
+function clearDates() { dates = []; render(); }
+function moveMonth(diff) {
+  view.setMonth(view.getMonth() + diff);
+  renderCalendar();
+}
+function renderCalendar() {
+  const y = view.getFullYear(), m = view.getMonth();
+  document.getElementById('calTitle').textContent = y + '年' + (m + 1) + '月';
+  document.getElementById('calWeekdays').innerHTML = WD.map((w, i) =>
+    `<div class="wd ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</div>`
+  ).join('');
+
+  const first = new Date(y, m, 1).getDay();
+  const last = new Date(y, m + 1, 0).getDate();
+  const todayStr = ymd(new Date());
+
+  let cells = Array.from({ length: first }, () => '<div class="day blank"></div>');
+  for (let d = 1; d <= last; d++) {
+    const s = ymd(new Date(y, m, d));
+    const cls = ['day'];
+    if (dates.some(x => x.d === s)) cls.push('sel');
+    if (s === todayStr) cls.push('today');
+    if (s < todayStr) cls.push('past');
+    const click = s < todayStr ? '' : ` onclick="toggleDate('${s}')"`;
+    cells.push(`<div class="${cls.join(' ')}"${click}>${d}</div>`);
+  }
+  document.getElementById('calDays').innerHTML = cells.join('');
 }
 function addWeekdays() {
   const today = new Date();
@@ -404,6 +445,7 @@ function chips(selected, onchange) {
   ).join('');
 }
 function render() {
+  renderCalendar();
   document.getElementById('bulkSlots').innerHTML = chips(bulkSel, 'toggleBulk');
 
   document.getElementById('dateBlocks').innerHTML = dates.length
