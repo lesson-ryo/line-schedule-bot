@@ -190,16 +190,28 @@ def send_schedule(
     return f"{len(target_members)}人に日程候補（{mode_label}）を送信しました。\n送信先: {names}\n候補: {candidates}"
 
 
+def _comment_lines() -> list[str]:
+    """回答者が書いた連絡事項（任意入力）を整形して返す"""
+    comments = load_json("comments")
+    if not comments:
+        return []
+    lines = ["", "=== 連絡事項 ===", ""]
+    for c in comments:
+        lines.append(f"■ {c['display_name']}")
+        lines.append(f"  {c['text']}")
+    return lines
+
+
 def summarize_replies() -> str:
-    """votes.jsonの構造化データを集計して候補ごとの得票数を文字列で返す"""
+    """投票の構造化データを集計して候補ごとの得票数を文字列で返す"""
     candidates = load_json("candidates", default=[])
     votes = load_json("votes")
 
     if not candidates:
-        return "candidates.jsonが見つかりません。先に send で候補を送信してください。"
+        return "送信済みの候補が見つかりません。先に候補を送信してください。"
 
     if not votes:
-        return "まだ投票がありません。"
+        return "\n".join(["まだ投票がありません。"] + _comment_lines())
 
     tally = {i: [] for i in range(1, len(candidates) + 1)}
     for v in votes:
@@ -215,13 +227,15 @@ def summarize_replies() -> str:
     best = max(tally, key=lambda k: len(tally[k]))
     lines.append("")
     lines.append(f"最多得票: 候補{best}「{candidates[best-1]}」（{len(tally[best])}人）")
+    lines.extend(_comment_lines())
 
     return "\n".join(lines)
 
 
 def reset_replies() -> str:
     save_json("votes", [])
-    return "投票データをリセットしました。"
+    save_json("comments", [])
+    return "投票データと連絡事項をリセットしました。"
 
 
 if __name__ == "__main__":

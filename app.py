@@ -112,11 +112,21 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   input[type=checkbox] { margin-right: 10px; transform: scale(1.3); }
   button { width: 100%; padding: 14px; font-size: 16px; background: #06C755; color: #fff; border: none; border-radius: 8px; margin-top: 16px; }
   #status { margin-top: 12px; color: #666; }
+  h2 { font-size: 15px; margin: 22px 0 6px; }
+  .hint { font-size: 12px; color: #888; margin-bottom: 6px; }
+  textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-family: inherit; resize: vertical; }
 </style>
 </head>
 <body>
 <h1>都合の良い日程をすべて選んでください</h1>
 <form id="form"></form>
+
+<div id="commentBox" style="display:none">
+  <h2>連絡事項（任意）</h2>
+  <div class="hint">遅れる場合や希望などがあればご記入ください。</div>
+  <textarea id="comment" rows="3" maxlength="500" placeholder="例: 20時以降なら参加できます"></textarea>
+</div>
+
 <button id="submitBtn">この内容で送信する</button>
 <div id="status">読み込み中...</div>
 
@@ -144,6 +154,7 @@ async function main() {
       <input type="checkbox" name="candidate" value="${i + 1}">${c}
     </label>
   `).join("");
+  document.getElementById("commentBox").style.display = "block";
   document.getElementById("status").textContent = "";
 }
 
@@ -155,7 +166,11 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
     const res = await fetch("/liff/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken: idToken, selected: checked }),
+      body: JSON.stringify({
+        idToken: idToken,
+        selected: checked,
+        comment: document.getElementById("comment").value,
+      }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -233,6 +248,20 @@ def liff_submit():
             }
         )
     save_json("votes", votes)
+
+    # 自由記述（任意）。同じ人が再送信したら上書きする。
+    comment = (body.get("comment") or "").strip()[:500]
+    comments = [c for c in load_json("comments") if c["user_id"] != user_id]
+    if comment:
+        comments.append(
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "text": comment,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+    save_json("comments", comments)
 
     return {"ok": True, "selected": valid_selected}
 
