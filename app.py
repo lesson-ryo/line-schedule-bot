@@ -319,7 +319,9 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   #result { margin-top: 10px; padding: 12px; border-radius: 8px; white-space: pre-wrap; font-size: 13px; display: none; }
   #result.ok { background: #f0f9f3; border: 1px solid #b6e2c6; display: block; }
   #result.err { background: #fdf2f2; border: 1px solid #e0b4b4; display: block; }
-  label.member { display: block; padding: 7px 4px; font-size: 14px; }
+  .member { display: flex; justify-content: space-between; align-items: center; padding: 6px 4px; font-size: 14px; border-bottom: 1px solid #f4f4f4; }
+  .member .qwrap { font-size: 12px; color: #888; white-space: nowrap; }
+  .member .quota { width: 52px; padding: 5px; margin-left: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; text-align: center; }
   .links a { font-size: 13px; margin-right: 14px; }
 </style>
 </head>
@@ -373,8 +375,9 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <button onclick="send()" id="sendBtn">この内容でLINEに送信する</button>
   <div id="result"></div>
   <div class="links" style="margin-top:14px">
-    <a href="#" onclick="go('summarize');return false;">投票を集計する</a>
-    <a href="#" onclick="if(confirm('投票データを削除します。よろしいですか？'))go('reset');return false;">投票をリセットする</a>
+    <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
+    <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
+    <a href="#" onclick="if(confirm('回答データを削除します。よろしいですか？'))go('reset');return false;">回答をリセットする</a>
   </div>
 </div>
 
@@ -537,7 +540,12 @@ async function loadMembers() {
     }
     box.className = '';
     box.innerHTML = data.members.map((m, i) =>
-      `<label class="member"><input type="checkbox" value="${i + 1}" checked> ${i + 1}. ${m}</label>`
+      `<div class="member">
+         <label><input type="checkbox" value="${i + 1}" checked> ${i + 1}. ${m.name}</label>
+         <span class="qwrap">コマ数
+           <input class="quota" type="number" min="0" max="9" value="${m.quota}">
+         </span>
+       </div>`
     ).join('');
   } catch (e) {
     document.getElementById('members').textContent = 'メンバー取得に失敗しました: ' + e;
@@ -569,6 +577,11 @@ async function send() {
   btn.disabled = false; btn.textContent = 'この内容でLINEに送信する';
 }
 function go(path) { location.href = '/admin/' + path + '?token=' + encodeURIComponent(TOKEN); }
+function runAssign() {
+  const qs = Array.from(document.querySelectorAll('#members .quota')).map(i => i.value || '1');
+  if (!qs.length) { alert('メンバーがまだ登録されていません。'); return; }
+  location.href = '/admin/assign?token=' + encodeURIComponent(TOKEN) + '&quotas=' + qs.join(',');
+}
 
 initMessage();
 renderGrid();
@@ -589,10 +602,41 @@ def admin_panel():
 
 @app.route("/admin/members.json", methods=["GET"])
 def admin_members_json():
-    """管理画面が送信先チェックボックスを描画するためのメンバー一覧（表示名のみ）"""
+    """管理画面が送信先とコマ数を描画するためのメンバー一覧"""
     check_admin_token()
     members = load_json("members")
-    return {"members": [m["display_name"] for m in members]}
+    quotas = load_json("quotas", default={})
+    return {
+        "members": [
+            {"name": m["display_name"], "quota": int(quotas.get(m["user_id"], 1))}
+            for m in members
+        ]
+    }
+
+
+@app.route("/admin/assign", methods=["GET"])
+def admin_assign():
+    """?token=...&quotas=1,2,1 の形式で、回答をもとに時間枠を自動割り当てする。
+    quotasはメンバー一覧の並び順に対応するコマ数（省略時は全員1コマ）。"""
+    check_admin_token()
+    import assign as assign_mod
+
+    members = load_json("members")
+    raw = request.args.get("quotas", "")
+    counts = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+
+    quotas = {}
+    for i, mem in enumerate(members):
+        quotas[mem["user_id"]] = counts[i] if i < len(counts) else 1
+    save_json("quotas", quotas)
+
+    candidates = load_json("candidates", default=[])
+    votes = load_json("votes")
+    result = assign_mod.auto_assign(candidates, votes, quotas)
+
+    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+    body = assign_mod.format_result(result)
+    return f'<pre>{body}</pre><p><a href="{panel}">管理画面に戻る</a></p>'
 
 
 @app.route("/admin/members", methods=["GET"])
