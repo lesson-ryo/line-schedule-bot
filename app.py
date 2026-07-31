@@ -113,7 +113,6 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   button { width: 100%; padding: 14px; font-size: 16px; background: #06C755; color: #fff; border: none; border-radius: 8px; margin-top: 16px; }
   #status { margin-top: 12px; color: #666; }
   h2 { font-size: 15px; margin: 22px 0 6px; }
-  .hint { font-size: 12px; color: #888; margin-bottom: 6px; }
   textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-family: inherit; resize: vertical; }
 </style>
 </head>
@@ -122,9 +121,8 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
 <form id="form"></form>
 
 <div id="commentBox" style="display:none">
-  <h2>連絡事項（任意）</h2>
-  <div class="hint">遅れる場合や希望などがあればご記入ください。</div>
-  <textarea id="comment" rows="3" maxlength="500" placeholder="例: 20時以降なら参加できます"></textarea>
+  <h2>（任意）連絡事項やリクエストあれば</h2>
+  <textarea id="comment" rows="3" maxlength="500"></textarea>
 </div>
 
 <button id="submitBtn">この内容で送信する</button>
