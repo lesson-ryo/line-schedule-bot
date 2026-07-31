@@ -352,7 +352,8 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const WD = ['日','月','火','水','木','金','土'];
-const HOURS = Array.from({ length: 15 }, (_, i) => String(i + 8).padStart(2, '0') + ':00');
+// 10:00〜22:00（開始時刻を変えたい場合は下の 10 と length を調整する）
+const HOURS = Array.from({ length: 13 }, (_, i) => String(i + 10).padStart(2, '0') + ':00');
 
 let selected = new Set();      // "2026-08-03 14:00"
 let weekStart = startOfWeek(new Date());
