@@ -276,6 +276,11 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   .wk .cell.past { background: #f6f6f6; border-color: #f0f0f0; cursor: default; }
   .wk .cell.past:hover { border-color: #f0f0f0; }
 
+  textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; }
+  .bubble { max-width: 300px; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 14px; }
+  .bubbletext { font-size: 13px; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
+  .bubblesub { font-size: 11px; color: #999; margin-top: 4px; }
+  .bubblebtn { margin-top: 10px; background: #06C755; color: #fff; text-align: center; padding: 9px; border-radius: 6px; font-size: 13px; font-weight: 600; }
   #preview { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow-y: auto; }
   #preview li { padding: 6px 4px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
   #preview li.head { font-weight: 600; color: #06783b; background: #f6fbf8; border-bottom: none; padding-top: 10px; }
@@ -304,13 +309,26 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<h2>2. 送信内容のプレビュー</h2>
+<h2>2. メッセージを編集する</h2>
 <div class="card">
-  <div class="muted" id="count">候補: 0件</div>
+  <textarea id="message" rows="3" placeholder="メンバーに表示されるメッセージ"></textarea>
+  <div class="row" style="margin-top:8px">
+    <span class="muted">候補ボタンの上に表示されます</span>
+    <button class="mini" onclick="resetMessage()">初期文に戻す</button>
+  </div>
+</div>
+
+<h2>3. 送信内容のプレビュー</h2>
+<div class="card">
+  <div class="bubble">
+    <div class="bubbletext" id="msgPreview"></div>
+    <div class="bubblesub" id="count">候補: 0件</div>
+    <div class="bubblebtn">日程を選ぶ</div>
+  </div>
   <ul id="preview"></ul>
 </div>
 
-<h2>3. 送信先を選ぶ</h2>
+<h2>4. 送信先を選ぶ</h2>
 <div class="card">
   <div class="row" style="margin-bottom:8px">
     <button class="sub" onclick="toggleAll(true)">全員選択</button>
@@ -319,7 +337,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div id="members" class="muted">読み込み中...</div>
 </div>
 
-<h2>4. 送信</h2>
+<h2>5. 送信</h2>
 <div class="card">
   <button onclick="send()" id="sendBtn">この内容でLINEに送信する</button>
   <div id="result"></div>
@@ -395,6 +413,23 @@ function applyCell(el) {
   if (dragMode === 'on') { selected.add(key); el.classList.add('sel'); }
   else { selected.delete(key); el.classList.remove('sel'); }
 }
+const DEFAULT_MESSAGE = '日程調整のお願いです。ボタンをタップして、都合の良い日程をすべて選んでください。';
+const msgBox = document.getElementById('message');
+
+function currentMessage() { return msgBox.value.trim() || DEFAULT_MESSAGE; }
+function onMessageInput() {
+  document.getElementById('msgPreview').textContent = currentMessage();
+  try { localStorage.setItem('scheduleBotMessage', msgBox.value); } catch (e) {}
+}
+function resetMessage() { msgBox.value = DEFAULT_MESSAGE; onMessageInput(); }
+function initMessage() {
+  let saved = '';
+  try { saved = localStorage.getItem('scheduleBotMessage') || ''; } catch (e) {}
+  msgBox.value = saved || DEFAULT_MESSAGE;
+  msgBox.addEventListener('input', onMessageInput);
+  onMessageInput();
+}
+
 function renderPreview() {
   const keys = Array.from(selected).sort();
   document.getElementById('count').textContent = '候補: ' + keys.length + '件';
@@ -490,7 +525,8 @@ async function send() {
   try {
     const url = '/admin/send?token=' + encodeURIComponent(TOKEN)
       + '&candidates=' + encodeURIComponent(list.join('|'))
-      + '&to=' + to.join(',');
+      + '&to=' + to.join(',')
+      + '&message=' + encodeURIComponent(currentMessage());
     const res = await fetch(url);
     const text = await res.text();
     box.className = res.ok ? 'ok' : 'err';
@@ -502,6 +538,7 @@ async function send() {
 }
 function go(path) { location.href = '/admin/' + path + '?token=' + encodeURIComponent(TOKEN); }
 
+initMessage();
 renderGrid();
 renderPreview();
 loadMembers();
@@ -551,7 +588,9 @@ def admin_send():
     to_raw = request.args.get("to", "")
     member_indices = [int(x) for x in to_raw.split(",") if x.strip().isdigit()] or None
 
-    result = send_schedule(candidates, member_indices)
+    message = request.args.get("message", "")
+
+    result = send_schedule(candidates, member_indices, message)
     return f"<pre>{result}</pre>"
 
 

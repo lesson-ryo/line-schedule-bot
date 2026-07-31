@@ -85,8 +85,13 @@ def build_flex_contents(candidates: list[str]) -> dict:
     }
 
 
-def build_liff_link_contents(num_candidates: int) -> dict:
-    """候補が多いとき用。ボタン1つだけ(LIFFフォームを開く)のシンプルなFlex Message"""
+DEFAULT_MESSAGE = "日程調整のお願いです。ボタンをタップして、都合の良い日程をすべて選んでください。"
+
+
+def build_liff_link_contents(num_candidates: int, message: str = "") -> dict:
+    """ボタン1つだけ(LIFFフォームを開く)のシンプルなFlex Message。
+    messageを指定するとメッセージ本文を差し替えられる。"""
+    body = (message or DEFAULT_MESSAGE).strip()
     return {
         "type": "bubble",
         "body": {
@@ -95,10 +100,17 @@ def build_liff_link_contents(num_candidates: int) -> dict:
             "contents": [
                 {
                     "type": "text",
-                    "text": f"日程候補が{num_candidates}件届きました。ボタンをタップして、都合の良い日程をすべて選んでください。",
+                    "text": body,
                     "wrap": True,
                     "weight": "bold",
                     "size": "sm",
+                },
+                {
+                    "type": "text",
+                    "text": f"候補: {num_candidates}件",
+                    "size": "xs",
+                    "color": "#999999",
+                    "margin": "sm",
                 },
                 {
                     "type": "button",
@@ -128,9 +140,14 @@ def list_members() -> str:
     return "\n".join(lines)
 
 
-def send_schedule(candidates: list[str], member_indices: list[int] | None = None) -> str:
+def send_schedule(
+    candidates: list[str],
+    member_indices: list[int] | None = None,
+    message: str = "",
+) -> str:
     """日程候補ボタン付きメッセージをPush送信する（Push APIなので無料通数を消費）。
-    member_indices を指定すると list_members() の番号で送信先を絞り込める。省略時は全員に送信。"""
+    member_indices を指定すると list_members() の番号で送信先を絞り込める。省略時は全員に送信。
+    message を指定するとメッセージ本文を差し替えられる。"""
     members = load_json("members")
     if not members:
         return "membersが空です。先にLINE公式アカウントを友だち追加してもらってください。"
@@ -150,8 +167,8 @@ def send_schedule(candidates: list[str], member_indices: list[int] | None = None
                 "LIFFフォームでの送信が必要ですが、環境変数 LIFF_ID が設定されていません。"
                 "LINE DevelopersでLIFFアプリを登録し、RenderにLIFF_IDを設定してください。"
             )
-        contents_dict = build_liff_link_contents(len(candidates))
-        alt_text = "日程候補が届きました。タップしてフォームを開いてください。"
+        contents_dict = build_liff_link_contents(len(candidates), message)
+        alt_text = (message or DEFAULT_MESSAGE).strip()[:100]
         mode_label = "LIFFフォーム式"
     else:
         contents_dict = build_flex_contents(candidates)
