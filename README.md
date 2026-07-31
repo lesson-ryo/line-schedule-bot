@@ -1,13 +1,12 @@
-# LINE公式アカウント 日程調整Bot（タップ投票版・外部API不要）
+# LINE公式アカウント 日程調整Bot（LIFFチェックボックス投票版）
 
-LINE公式アカウントの友だち（メンバー）に日程候補をボタン付きメッセージ（Flex Message）で一斉送信し、メンバーがボタンをタップするだけで回答できるBotです。タップは複数選択・解除（もう一度タップ）に対応し、集計は構造化データを読むだけなので外部APIは一切使いません。
-
-候補が13件以上（`LIFF_THRESHOLD`で変更可）になると、自動的にLIFF（LINEアプリ内で開くミニWebページ）のチェックボックスフォームに切り替わります。ボタンを1つずつ並べる方式はLINEの仕様上ボタン数が増えると使いにくくなるため、候補が多いときはこちらが使われます。設定方法は「7. （候補が多い場合）LIFFフォームを設定する」を参照してください。
+LINE公式アカウントの友だち（メンバー）に日程候補を送ると、メンバーはLINEアプリ内で開くミニWebページ（LIFF）上でチェックボックスから複数選択して回答できるBotです。候補数に上限は実質なく（LINEのFlex Messageの50KB制限内であればOK）、集計は構造化データを読むだけなので自由記述の解釈ミスもありません。
 
 想定人数50人程度であれば、以下の構成はすべて無料枠に収まります。
 
 - LINE公式アカウント：フリープラン（月200通まで無料。返信への自動応答はカウント対象外）
 - サーバー：Render無料プラン（月750時間まで無料）
+- データ保存：Upstash Redis無料枠（Renderのスリープ・再デプロイでもデータが消えない）
 - 集計処理：外部APIなし（費用ゼロ）
 
 ---
@@ -15,11 +14,13 @@ LINE公式アカウントの友だち（メンバー）に日程候補をボタ�
 ## 全体の流れ
 
 1. LINE Developersで「Messaging APIチャネル」を作成し、認証情報を取得する
-2. このコードをGitHubにアップロードする
-3. Renderにデプロイし、環境変数を設定する
-4. RenderのURLをLINE DevelopersのWebhook URLに設定する
-5. メンバーにLINE公式アカウントを友だち追加してもらう
-6. `schedule_tools.py` で日程候補を送信・返信を集計する
+2. Upstash（無料）でデータ保存用のRedisを作成する
+3. このコードをGitHubにアップロードする
+4. Renderにデプロイし、環境変数を設定する
+5. RenderのURLをLINE DevelopersのWebhook URLに設定する
+6. LINE DevelopersでLIFFアプリを登録する（回答フォーム用）
+7. メンバーにLINE公式アカウントを友だち追加してもらう
+8. `schedule_tools.py` で日程候補を送信・返信を集計する
 
 ---
 
@@ -39,7 +40,22 @@ LINE公式アカウントの友だち（メンバー）に日程候補をボタ�
 
 ---
 
-## 2. コードをGitHubにアップロードする
+## 2. Upstashでデータ保存用のRedisを作成する
+
+Render無料プランはディスクを保持しないため（15分操作がないとスリープし、再起動・再デプロイのたびにファイルが消える）、友だち一覧や投票データはUpstash（無料のRedis）に保存します。
+
+1. [Upstash](https://upstash.com/) にアクセスし、アカウントを作成（GitHubアカウントでの登録も可）してログイン
+2. コンソールで「Create Database」
+3. 名前を入力（例: `line-schedule-bot`）、Type は **Regional**、リージョンは日本に近い場所（例: `ap-northeast-1` 東京）を選んで作成
+4. 作成したデータベースの詳細画面を開き、「REST API」セクションから以下を控える
+   - **UPSTASH_REDIS_REST_URL**
+   - **UPSTASH_REDIS_REST_TOKEN**
+
+無料枠は1日1万コマンド程度まで使えるため、友だち50人規模の個人利用であれば十分収まります。
+
+---
+
+## 3. コードをGitHubにアップロードする
 
 このフォルダ（`line-schedule-bot`）の中身をそのまま新しいGitHubリポジトリ（`line-schedule-bot`）にpushしてください。`.env` は `.gitignore` に含まれているので、誤ってアップロードされません。
 
@@ -55,7 +71,7 @@ git push -u origin main
 
 ---
 
-## 3. Renderにデプロイする
+## 4. Renderにデプロイする
 
 1. [Render](https://render.com/) にアカウント登録（GitHubアカウントで連携可能）
 2. ダッシュボードで「New +」→「Web Service」
@@ -69,6 +85,8 @@ git push -u origin main
    - `LINE_CHANNEL_ACCESS_TOKEN` … 手順1で控えたトークン
    - `LINE_CHANNEL_SECRET` … 手順1で控えたシークレット
    - `ADMIN_TOKEN` … 好きな文字列（推測されにくいランダムな文字列。「Generate」ボタンで自動生成できます）。日程送信・集計をブラウザから操作するための合言葉として使います
+   - `UPSTASH_REDIS_REST_URL` … 手順2で控えた値
+   - `UPSTASH_REDIS_REST_TOKEN` … 手順2で控えた値
 6. 「Create Web Service」でデプロイ開始（数分かかります）
 7. デプロイ完了後に表示されるURL（例: `https://your-app.onrender.com`）を控える
 
@@ -76,7 +94,7 @@ git push -u origin main
 
 ---
 
-## 4. Webhook URLを設定する
+## 5. Webhook URLを設定する
 
 1. LINE Developers Consoleに戻り、「Messaging API設定」タブを開く
 2. 「Webhook URL」に `https://your-app.onrender.com/webhook` を入力して保存
@@ -87,15 +105,38 @@ git push -u origin main
 
 ---
 
-## 5. メンバーに友だち追加してもらう
+## 6. LIFFアプリを登録する（回答フォーム用）
 
-チャネル基本設定タブにあるQRコードや友だち追加URLをメンバーに共有し、LINE公式アカウントを友だち追加してもらってください。追加された時点で `members.json` に自動で記録されます。
+回答フォームはLINEアプリ内で開くミニWebページ（LIFF）です。LIFFアプリはMessaging APIチャネルには直接追加できないため、同じプロバイダー内に「LINEログインチャネル」を新規作成し、そちらにLIFFアプリを登録します。
+
+1. LINE Developers Consoleでプロバイダーを開き、「新規チャネル作成」→「LINEログイン」を選択して作成（メールアドレスなど必須項目を入力し、LINE開発者契約に同意）
+2. 作成したチャネルの「LIFF」タブ →「追加」
+3. 以下を入力
+   - **LIFFアプリ名**: 任意（例: 日程調整フォーム）
+   - **サイズ**: Tall または Full
+   - **エンドポイントURL**: `https://your-app.onrender.com/liff`
+   - **Scope**: `openid` と `profile` の両方にチェック
+   - **友だち追加オプション**: Off でOK（すでにMessaging API側の公式アカウントを友だち追加してもらう前提のため）
+4. 作成後に表示される **LIFF ID**（`1234567890-AbCdEfGh` のような形式）を控える
+5. このLINEログインチャネルの「チャネル基本設定」タブを開き、**Channel ID**（チャネルID、数字のみ）を控える
+6. Renderの「Environment」タブで環境変数を追加
+   - `LIFF_ID` … 手順4で控えたLIFF ID
+   - `LINE_CHANNEL_ID` … 手順5で控えたChannel ID
+7. 「Save, rebuild, and deploy」で再デプロイ
+
+> LINEログインチャネルとMessaging APIチャネルが同じプロバイダー内にあれば、LIFFで取得できるユーザーIDとMessaging APIのユーザーIDは同じ値になります（提供元が同じであれば自動的に一致します）。
 
 ---
 
-## 6. 日程候補を送る・投票を集計する（ブラウザから操作）
+## 7. メンバーに友だち追加してもらう
 
-無料プランではShellが使えないため、以下のURLにブラウザでアクセスするだけで操作します。`YOUR_TOKEN` の部分は手順3で設定した `ADMIN_TOKEN` の値に置き換えてください。このURLは合言葉（トークン）を含むので、他人に共有しないでください。
+チャネル基本設定タブにあるQRコードや友だち追加URLをメンバーに共有し、LINE公式アカウントを友だち追加してもらってください。追加された時点でUpstash（`members`キー）に自動で記録されます。
+
+---
+
+## 8. 日程候補を送る・投票を集計する（ブラウザから操作）
+
+無料プランではShellが使えないため、以下のURLにブラウザでアクセスするだけで操作します。`YOUR_TOKEN` の部分は手順4で設定した `ADMIN_TOKEN` の値に置き換えてください。このURLは合言葉（トークン）を含むので、他人に共有しないでください。
 
 **登録メンバー一覧を確認する**（送信先を絞りたいときに使う番号を確認）
 
@@ -103,7 +144,7 @@ git push -u origin main
 https://your-app.onrender.com/admin/members?token=YOUR_TOKEN
 ```
 
-**日程候補を送信する**（候補は `|` 区切りで指定。日本語や記号も使えます）
+**日程候補を送信する**（候補は `|` 区切りで指定。日本語や記号も使えます。件数の上限は実質ありません）
 
 ```
 https://your-app.onrender.com/admin/send?token=YOUR_TOKEN&candidates=8/5(水) 14:00-|8/6(木) 10:00-|8/7(金) 15:00-
@@ -115,7 +156,9 @@ https://your-app.onrender.com/admin/send?token=YOUR_TOKEN&candidates=8/5(水) 14
 https://your-app.onrender.com/admin/send?token=YOUR_TOKEN&candidates=8/5(水) 14:00-|8/6(木) 10:00-&to=1,3
 ```
 
-**投票を集計する**（メンバーがボタンをタップした後にアクセス）
+メンバーには「日程を選ぶ」ボタン付きメッセージが届き、タップするとLIFFフォームが開いてチェックボックスで複数選択→送信できます。
+
+**投票を集計する**（メンバーが送信した後にアクセス）
 
 ```
 https://your-app.onrender.com/admin/summarize?token=YOUR_TOKEN
@@ -127,31 +170,9 @@ https://your-app.onrender.com/admin/summarize?token=YOUR_TOKEN
 https://your-app.onrender.com/admin/reset?token=YOUR_TOKEN
 ```
 
-`summarize` にアクセスすると、候補ごとの得票数・回答者名・最多得票の候補が表示されます。タップは構造化データとして届くため、自由記述のような解釈ミスは発生しません。
+`summarize` にアクセスすると、候補ごとの得票数・回答者名・最多得票の候補が表示されます。
 
-> 無料プランは15分アクセスがないとスリープするため、初回アクセス時は表示まで30〜60秒ほどかかることがあります。
-
----
-
-## 7. （候補が多い場合）LIFFフォームを設定する
-
-候補を13件以上にしたい場合、この設定をしておくと自動でLIFFフォームが使われるようになります（不要なら設定しなくてもタップ式は動きます。ただし13件以上を送るとエラーメッセージが返ります）。
-
-1. LINE Developers Consoleでチャネルを開き、「LIFF」タブ →「追加」
-2. 以下を入力
-   - **LIFFアプリ名**: 任意（例: 日程調整フォーム）
-   - **サイズ**: Tall または Full
-   - **エンドポイントURL**: `https://your-app.onrender.com/liff`
-   - **Scope**: `openid` と `profile` の両方にチェック
-   - **ボットリンク機能**: On（任意）
-3. 作成後に表示される **LIFF ID**（`1234567890-AbCdEfGh` のような形式）を控える
-4. 「チャネル基本設定」タブを開き、**Channel ID**（チャネルID、数字のみ）を控える
-5. Renderの「Environment」タブで環境変数を追加
-   - `LIFF_ID` … 手順3で控えたLIFF ID
-   - `LINE_CHANNEL_ID` … 手順4で控えたChannel ID
-6. 「Save, rebuild, and deploy」で再デプロイ
-
-以降、`/admin/send` で候補を13件以上指定すると、メンバーには「日程を選ぶ」ボタン付きメッセージが届き、タップするとLIFFフォームが開いてチェックボックスで複数選択→送信できます。集計は `/admin/summarize` で今まで通り確認できます。
+> 無料プランは15分アクセスがないとスリープするため、初回アクセス時は表示まで30〜60秒ほどかかることがあります（データ自体はUpstashに保存されているので、スリープしても消えません）。
 
 ---
 
@@ -159,13 +180,13 @@ https://your-app.onrender.com/admin/reset?token=YOUR_TOKEN
 
 | ファイル | 役割 |
 |---|---|
-| `app.py` | LINEからのWebhook（友だち追加・ボタンタップ）を受け取るサーバー本体 |
-| `schedule_tools.py` | 日程候補（ボタン付き）の一斉送信・投票の集計を行うコマンドラインツール |
+| `app.py` | LINEからのWebhook（友だち追加・LIFF投票受信）を受け取るサーバー本体 |
+| `schedule_tools.py` | 日程候補の一斉送信・投票の集計を行うコマンドラインツール |
+| `storage.py` | データ保存の共通層。Upstash Redis（本番）またはローカルJSON（開発用フォールバック）を切り替える |
 | `requirements.txt` | 必要なPythonライブラリ |
 | `.env.example` | 環境変数のサンプル（ローカルで動かす場合に `.env` にコピーして使用） |
-| `members.json` | 友だち追加してくれたメンバーの一覧（自動生成） |
-| `votes.json` | メンバーがタップした投票の一覧（自動生成） |
-| `candidates.json` | 直近で送信した日程候補の一覧（自動生成、集計時に参照） |
+
+友だち一覧（`members`）・投票（`votes`）・直近の候補（`candidates`）は、`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` が設定されていればUpstashに、未設定であればローカルの `members.json` / `votes.json` / `candidates.json` に保存されます（本番のRenderでは前者を必ず設定してください）。
 
 ---
 
@@ -176,6 +197,7 @@ https://your-app.onrender.com/admin/reset?token=YOUR_TOKEN
 | LINEメッセージ（Push） | 月200通まで無料 | 日程候補送信1回＝50通消費（月4回程度まで無料） |
 | LINEメッセージ（Reply） | カウント対象外・無制限 | 返信への自動応答は何通でも無料 |
 | Render | 月750時間無料 | 個人利用なら余裕で収まる |
+| Upstash Redis | 1日1万コマンドまで無料 | 個人利用なら余裕で収まる |
 | 集計処理 | 外部API不使用 | 費用ゼロ |
 
 外部APIを使わないため、月の運用コストは実質ゼロです。

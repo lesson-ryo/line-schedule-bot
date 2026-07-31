@@ -25,8 +25,6 @@
 
 import os
 import sys
-import json
-from pathlib import Path
 
 from linebot.v3.messaging import (
     Configuration,
@@ -37,29 +35,16 @@ from linebot.v3.messaging import (
     FlexContainer,
 )
 
+from storage import load_json, save_json
+
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 LIFF_ID = os.environ.get("LIFF_ID", "")
 
 # 候補数がこれを超えたら、ボタン1つずつのFlex Messageではなく
-# LIFF(チェックボックスフォーム)へのリンクを送る
-LIFF_THRESHOLD = 12
+# LIFF(チェックボックスフォーム)へのリンクを送る。0にすると常にLIFFフォームを使う。
+LIFF_THRESHOLD = 0
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
-
-BASE_DIR = Path(__file__).parent
-MEMBERS_FILE = BASE_DIR / "members.json"
-VOTES_FILE = BASE_DIR / "votes.json"
-CANDIDATES_FILE = BASE_DIR / "candidates.json"
-
-
-def load_json(path, default=None):
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return default if default is not None else []
-
-
-def save_json(path, data):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def build_flex_contents(candidates: list[str]) -> dict:
@@ -133,7 +118,7 @@ def build_liff_link_contents(num_candidates: int) -> dict:
 
 def list_members() -> str:
     """登録メンバーに番号を振って一覧表示する（送信先を絞り込むときに使う番号）"""
-    members = load_json(MEMBERS_FILE)
+    members = load_json("members")
     if not members:
         return "メンバーがまだ登録されていません。先にLINE公式アカウントを友だち追加してもらってください。"
 
@@ -146,7 +131,7 @@ def list_members() -> str:
 def send_schedule(candidates: list[str], member_indices: list[int] | None = None) -> str:
     """日程候補ボタン付きメッセージをPush送信する（Push APIなので無料通数を消費）。
     member_indices を指定すると list_members() の番号で送信先を絞り込める。省略時は全員に送信。"""
-    members = load_json(MEMBERS_FILE)
+    members = load_json("members")
     if not members:
         return "membersが空です。先にLINE公式アカウントを友だち追加してもらってください。"
 
@@ -157,14 +142,13 @@ def send_schedule(candidates: list[str], member_indices: list[int] | None = None
     else:
         target_members = members
 
-    save_json(CANDIDATES_FILE, candidates)
+    save_json("candidates", candidates)
 
     if len(candidates) > LIFF_THRESHOLD:
         if not LIFF_ID:
             return (
-                f"候補が{len(candidates)}件（{LIFF_THRESHOLD}件超）のためLIFFフォームでの送信が必要ですが、"
-                "環境変数 LIFF_ID が設定されていません。LINE DevelopersでLIFFアプリを登録し、"
-                "RenderにLIFF_IDを設定してください。"
+                "LIFFフォームでの送信が必要ですが、環境変数 LIFF_ID が設定されていません。"
+                "LINE DevelopersでLIFFアプリを登録し、RenderにLIFF_IDを設定してください。"
             )
         contents_dict = build_liff_link_contents(len(candidates))
         alt_text = "日程候補が届きました。タップしてフォームを開いてください。"
@@ -191,8 +175,8 @@ def send_schedule(candidates: list[str], member_indices: list[int] | None = None
 
 def summarize_replies() -> str:
     """votes.jsonの構造化データを集計して候補ごとの得票数を文字列で返す"""
-    candidates = load_json(CANDIDATES_FILE, default=[])
-    votes = load_json(VOTES_FILE)
+    candidates = load_json("candidates", default=[])
+    votes = load_json("votes")
 
     if not candidates:
         return "candidates.jsonが見つかりません。先に send で候補を送信してください。"
@@ -219,7 +203,7 @@ def summarize_replies() -> str:
 
 
 def reset_replies() -> str:
-    save_json(VOTES_FILE, [])
+    save_json("votes", [])
     return "投票データをリセットしました。"
 
 

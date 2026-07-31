@@ -11,10 +11,8 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 """
 
 import os
-import json
 import requests
 from datetime import datetime
-from pathlib import Path
 
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
@@ -28,6 +26,8 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 
+from storage import load_json, save_json
+
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
@@ -39,31 +39,16 @@ handler = WebhookHandler(CHANNEL_SECRET)
 
 app = Flask(__name__)
 
-BASE_DIR = Path(__file__).parent
-MEMBERS_FILE = BASE_DIR / "members.json"
-VOTES_FILE = BASE_DIR / "votes.json"
-CANDIDATES_FILE = BASE_DIR / "candidates.json"
-
-
-def load_json(path, default=None):
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return default if default is not None else []
-
-
-def save_json(path, data):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
 
 def upsert_member(user_id, display_name):
-    members = load_json(MEMBERS_FILE)
+    members = load_json("members")
     for m in members:
         if m["user_id"] == user_id:
             m["display_name"] = display_name
-            save_json(MEMBERS_FILE, members)
+            save_json("members", members)
             return
     members.append({"user_id": user_id, "display_name": display_name})
-    save_json(MEMBERS_FILE, members)
+    save_json("members", members)
 
 
 def get_display_name(line_api, user_id):
@@ -76,11 +61,11 @@ def get_display_name(line_api, user_id):
 
 def toggle_vote(user_id, display_name, candidate_index):
     """候補へのタップをトグルする。戻り値: (選択された=True / 解除された=False)"""
-    votes = load_json(VOTES_FILE)
+    votes = load_json("votes")
     for v in votes:
         if v["user_id"] == user_id and v["candidate_index"] == candidate_index:
             votes.remove(v)
-            save_json(VOTES_FILE, votes)
+            save_json("votes", votes)
             return False
     votes.append(
         {
@@ -90,7 +75,7 @@ def toggle_vote(user_id, display_name, candidate_index):
             "timestamp": datetime.now().isoformat(),
         }
     )
-    save_json(VOTES_FILE, votes)
+    save_json("votes", votes)
     return True
 
 
@@ -200,7 +185,7 @@ def liff_page():
 @app.route("/liff/candidates", methods=["GET"])
 def liff_candidates():
     """LIFFフォームが現在の候補一覧を取得するための公開エンドポイント(メンバー用・認証不要・読み取り専用)"""
-    candidates = load_json(CANDIDATES_FILE, default=[])
+    candidates = load_json("candidates", default=[])
     return {"candidates": candidates}
 
 
@@ -231,10 +216,10 @@ def liff_submit():
 
     upsert_member(user_id, display_name)
 
-    candidates = load_json(CANDIDATES_FILE, default=[])
+    candidates = load_json("candidates", default=[])
     valid_selected = [i for i in selected if isinstance(i, int) and 0 < i <= len(candidates)]
 
-    votes = load_json(VOTES_FILE)
+    votes = load_json("votes")
     votes = [v for v in votes if v["user_id"] != user_id]
     for idx in valid_selected:
         votes.append(
@@ -245,7 +230,7 @@ def liff_submit():
                 "timestamp": datetime.now().isoformat(),
             }
         )
-    save_json(VOTES_FILE, votes)
+    save_json("votes", votes)
 
     return {"ok": True, "selected": valid_selected}
 
@@ -337,7 +322,7 @@ def handle_postback(event):
         return
 
     candidate_index = int(data["candidate"])
-    candidates = load_json(CANDIDATES_FILE, default=[])
+    candidates = load_json("candidates", default=[])
 
     with ApiClient(configuration) as api_client:
         line_api = MessagingApi(api_client)
