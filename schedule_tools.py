@@ -38,6 +38,11 @@ from linebot.v3.messaging import (
 )
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
+LIFF_ID = os.environ.get("LIFF_ID", "")
+
+# 候補数がこれを超えたら、ボタン1つずつのFlex Messageではなく
+# LIFF(チェックボックスフォーム)へのリンクを送る
+LIFF_THRESHOLD = 12
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 
@@ -95,6 +100,37 @@ def build_flex_contents(candidates: list[str]) -> dict:
     }
 
 
+def build_liff_link_contents(num_candidates: int) -> dict:
+    """候補が多いとき用。ボタン1つだけ(LIFFフォームを開く)のシンプルなFlex Message"""
+    return {
+        "type": "bubble",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": f"日程候補が{num_candidates}件届きました。ボタンをタップして、都合の良い日程をすべて選んでください。",
+                    "wrap": True,
+                    "weight": "bold",
+                    "size": "sm",
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#06C755",
+                    "margin": "md",
+                    "action": {
+                        "type": "uri",
+                        "label": "日程を選ぶ",
+                        "uri": f"https://liff.line.me/{LIFF_ID}",
+                    },
+                },
+            ],
+        },
+    }
+
+
 def list_members() -> str:
     """登録メンバーに番号を振って一覧表示する（送信先を絞り込むときに使う番号）"""
     members = load_json(MEMBERS_FILE)
@@ -123,9 +159,23 @@ def send_schedule(candidates: list[str], member_indices: list[int] | None = None
 
     save_json(CANDIDATES_FILE, candidates)
 
-    contents_dict = build_flex_contents(candidates)
+    if len(candidates) > LIFF_THRESHOLD:
+        if not LIFF_ID:
+            return (
+                f"候補が{len(candidates)}件（{LIFF_THRESHOLD}件超）のためLIFFフォームでの送信が必要ですが、"
+                "環境変数 LIFF_ID が設定されていません。LINE DevelopersでLIFFアプリを登録し、"
+                "RenderにLIFF_IDを設定してください。"
+            )
+        contents_dict = build_liff_link_contents(len(candidates))
+        alt_text = "日程候補が届きました。タップしてフォームを開いてください。"
+        mode_label = "LIFFフォーム式"
+    else:
+        contents_dict = build_flex_contents(candidates)
+        alt_text = "日程候補が届きました。タップして回答してください。"
+        mode_label = "タップ式"
+
     flex_message = FlexMessage(
-        alt_text="日程候補が届きました。タップして回答してください。",
+        alt_text=alt_text,
         contents=FlexContainer.from_dict(contents_dict),
     )
 
@@ -136,7 +186,7 @@ def send_schedule(candidates: list[str], member_indices: list[int] | None = None
                 PushMessageRequest(to=m["user_id"], messages=[flex_message])
             )
     names = [m["display_name"] for m in target_members]
-    return f"{len(target_members)}人に日程候補（タップ式）を送信しました。\n送信先: {names}\n候補: {candidates}"
+    return f"{len(target_members)}人に日程候補（{mode_label}）を送信しました。\n送信先: {names}\n候補: {candidates}"
 
 
 def summarize_replies() -> str:

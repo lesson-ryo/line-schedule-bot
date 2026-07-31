@@ -12,6 +12,7 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 
 import os
 import json
+import requests
 from datetime import datetime
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, P
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+LIFF_ID = os.environ.get("LIFF_ID", "")
+LINE_CHANNEL_ID = os.environ.get("LINE_CHANNEL_ID", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -106,6 +109,145 @@ def webhook():
 def health_check():
     # Renderのスリープ解除やヘルスチェック用
     return "LINE schedule bot is running."
+
+
+LIFF_PAGE_HTML = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日程調整</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 16px; }
+  h1 { font-size: 18px; }
+  label { display: block; padding: 12px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 8px; }
+  input[type=checkbox] { margin-right: 10px; transform: scale(1.3); }
+  button { width: 100%; padding: 14px; font-size: 16px; background: #06C755; color: #fff; border: none; border-radius: 8px; margin-top: 16px; }
+  #status { margin-top: 12px; color: #666; }
+</style>
+</head>
+<body>
+<h1>都合の良い日程をすべて選んでください</h1>
+<form id="form"></form>
+<button id="submitBtn">この内容で送信する</button>
+<div id="status">読み込み中...</div>
+
+<script>
+const LIFF_ID = "__LIFF_ID__";
+let candidates = [];
+
+async function main() {
+  await liff.init({ liffId: LIFF_ID });
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+  const res = await fetch("/liff/candidates");
+  const data = await res.json();
+  candidates = data.candidates || [];
+  const form = document.getElementById("form");
+  if (candidates.length === 0) {
+    document.getElementById("status").textContent = "現在、回答可能な日程候補がありません。";
+    document.getElementById("submitBtn").style.display = "none";
+    return;
+  }
+  form.innerHTML = candidates.map((c, i) => `
+    <label>
+      <input type="checkbox" name="candidate" value="${i + 1}">${c}
+    </label>
+  `).join("");
+  document.getElementById("status").textContent = "";
+}
+
+document.getElementById("submitBtn").addEventListener("click", async () => {
+  const checked = Array.from(document.querySelectorAll('input[name="candidate"]:checked')).map(el => parseInt(el.value, 10));
+  document.getElementById("status").textContent = "送信中...";
+  try {
+    const idToken = liff.getIDToken();
+    const res = await fetch("/liff/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken: idToken, selected: checked }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      document.getElementById("status").textContent = "送信しました。このページを閉じてOKです。";
+    } else {
+      document.getElementById("status").textContent = "エラー: " + (data.error || "送信に失敗しました。");
+    }
+  } catch (e) {
+    document.getElementById("status").textContent = "エラーが発生しました: " + e;
+  }
+});
+
+main().catch(e => {
+  document.getElementById("status").textContent = "初期化エラー: " + e;
+});
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/liff", methods=["GET"])
+def liff_page():
+    """LIFF(LINEアプリ内ブラウザ)で開くチェックボックス式の投票フォーム。
+    候補数が多いとき(schedule_tools.LIFF_THRESHOLD超)はこちらへのリンクを送る。"""
+    return LIFF_PAGE_HTML.replace("__LIFF_ID__", LIFF_ID)
+
+
+@app.route("/liff/candidates", methods=["GET"])
+def liff_candidates():
+    """LIFFフォームが現在の候補一覧を取得するための公開エンドポイント(メンバー用・認証不要・読み取り専用)"""
+    candidates = load_json(CANDIDATES_FILE, default=[])
+    return {"candidates": candidates}
+
+
+@app.route("/liff/submit", methods=["POST"])
+def liff_submit():
+    """LIFFフォームからの投票送信を受け取る。idTokenをLINE側のverifyエンドポイントで検証し、
+    なりすましを防いだ上でこのユーザーの投票を今回選択した内容で上書きする。"""
+    body = request.get_json(silent=True) or {}
+    id_token = body.get("idToken", "")
+    selected = body.get("selected", [])
+
+    if not id_token:
+        return {"error": "idTokenがありません。"}, 400
+
+    verify_res = requests.post(
+        "https://api.line.me/oauth2/v2.1/verify",
+        data={"id_token": id_token, "client_id": LINE_CHANNEL_ID},
+        timeout=10,
+    )
+    if verify_res.status_code != 200:
+        return {"error": "認証に失敗しました。もう一度LINEアプリ内からフォームを開き直してください。"}, 401
+
+    payload = verify_res.json()
+    user_id = payload.get("sub", "")
+    display_name = payload.get("name", user_id)
+    if not user_id:
+        return {"error": "ユーザー情報を取得できませんでした。"}, 401
+
+    upsert_member(user_id, display_name)
+
+    candidates = load_json(CANDIDATES_FILE, default=[])
+    valid_selected = [i for i in selected if isinstance(i, int) and 0 < i <= len(candidates)]
+
+    votes = load_json(VOTES_FILE)
+    votes = [v for v in votes if v["user_id"] != user_id]
+    for idx in valid_selected:
+        votes.append(
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "candidate_index": idx,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+    save_json(VOTES_FILE, votes)
+
+    return {"ok": True, "selected": valid_selected}
 
 
 def check_admin_token():
