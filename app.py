@@ -29,6 +29,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, P
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -105,6 +106,48 @@ def webhook():
 def health_check():
     # Renderのスリープ解除やヘルスチェック用
     return "LINE schedule bot is running."
+
+
+def check_admin_token():
+    """無料プランはShellが使えないため、ブラウザから叩けるURLで管理操作を行う。
+    ?token=... にADMIN_TOKENと一致する値がないと403にする。"""
+    token = request.args.get("token", "")
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        abort(403)
+
+
+@app.route("/admin/send", methods=["GET"])
+def admin_send():
+    """?token=...&candidates=候補1|候補2|候補3 の形式でアクセスすると日程候補を一斉送信する"""
+    check_admin_token()
+    from schedule_tools import send_schedule
+
+    candidates_raw = request.args.get("candidates", "")
+    candidates = [c.strip() for c in candidates_raw.split("|") if c.strip()]
+    if not candidates:
+        return "候補が指定されていません。?candidates=候補1|候補2|候補3 の形式で指定してください。", 400
+    result = send_schedule(candidates)
+    return f"<pre>{result}</pre>"
+
+
+@app.route("/admin/summarize", methods=["GET"])
+def admin_summarize():
+    """?token=... にアクセスすると現在の投票状況を集計して表示する"""
+    check_admin_token()
+    from schedule_tools import summarize_replies
+
+    result = summarize_replies()
+    return f"<pre>{result}</pre>"
+
+
+@app.route("/admin/reset", methods=["GET"])
+def admin_reset():
+    """?token=... にアクセスすると投票データをリセットする（次回の日程調整の前に使う）"""
+    check_admin_token()
+    from schedule_tools import reset_replies
+
+    result = reset_replies()
+    return f"<pre>{result}</pre>"
 
 
 @handler.add(FollowEvent)

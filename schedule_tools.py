@@ -89,12 +89,11 @@ def build_flex_contents(candidates: list[str]) -> dict:
     }
 
 
-def send_schedule(candidates: list[str]):
+def send_schedule(candidates: list[str]) -> str:
     """membersに登録されている全員に日程候補ボタン付きメッセージをPush送信する（Push APIなので無料通数を消費）"""
     members = load_json(MEMBERS_FILE)
     if not members:
-        print("membersが空です。先にLINE公式アカウントを友だち追加してもらってください。")
-        return
+        return "membersが空です。先にLINE公式アカウントを友だち追加してもらってください。"
 
     save_json(CANDIDATES_FILE, candidates)
 
@@ -110,21 +109,19 @@ def send_schedule(candidates: list[str]):
             line_api.push_message(
                 PushMessageRequest(to=m["user_id"], messages=[flex_message])
             )
-    print(f"{len(members)}人に日程候補（タップ式）を送信しました。")
+    return f"{len(members)}人に日程候補（タップ式）を送信しました。\n候補: {candidates}"
 
 
-def summarize_replies():
-    """votes.jsonの構造化データを集計して候補ごとの得票数を表示する"""
+def summarize_replies() -> str:
+    """votes.jsonの構造化データを集計して候補ごとの得票数を文字列で返す"""
     candidates = load_json(CANDIDATES_FILE, default=[])
     votes = load_json(VOTES_FILE)
 
     if not candidates:
-        print("candidates.jsonが見つかりません。先に send コマンドで候補を送信してください。")
-        return
+        return "candidates.jsonが見つかりません。先に send で候補を送信してください。"
 
     if not votes:
-        print("まだ投票がありません。")
-        return
+        return "まだ投票がありません。"
 
     tally = {i: [] for i in range(1, len(candidates) + 1)}
     for v in votes:
@@ -132,18 +129,21 @@ def summarize_replies():
         if idx in tally:
             tally[idx].append(v["display_name"])
 
-    print("=== 集計結果 ===\n")
+    lines = ["=== 集計結果 ===", ""]
     for i, c in enumerate(candidates, start=1):
         names = tally[i]
-        print(f"{i}. {c} — {len(names)}人: {', '.join(names) if names else 'なし'}")
+        lines.append(f"{i}. {c} — {len(names)}人: {', '.join(names) if names else 'なし'}")
 
     best = max(tally, key=lambda k: len(tally[k]))
-    print(f"\n最多得票: 候補{best}「{candidates[best-1]}」（{len(tally[best])}人）")
+    lines.append("")
+    lines.append(f"最多得票: 候補{best}「{candidates[best-1]}」（{len(tally[best])}人）")
+
+    return "\n".join(lines)
 
 
-def reset_replies():
+def reset_replies() -> str:
     save_json(VOTES_FILE, [])
-    print("投票データをリセットしました。")
+    return "投票データをリセットしました。"
 
 
 if __name__ == "__main__":
@@ -157,11 +157,11 @@ if __name__ == "__main__":
         if len(sys.argv) < 3:
             print("送信する候補日程を1つ以上指定してください。")
             sys.exit(1)
-        send_schedule(sys.argv[2:])
+        print(send_schedule(sys.argv[2:]))
     elif command == "summarize":
-        summarize_replies()
+        print(summarize_replies())
     elif command == "reset":
-        reset_replies()
+        print(reset_replies())
     else:
         print(f"不明なコマンドです: {command}")
         print(__doc__)
