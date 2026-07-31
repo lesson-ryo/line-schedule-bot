@@ -251,7 +251,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <title>日程調整Bot 管理画面</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; max-width: 860px; margin: 0 auto; padding: 20px; color: #222; background: #fafafa; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #222; background: #fafafa; }
   h1 { font-size: 20px; }
   h2 { font-size: 15px; margin: 24px 0 8px; padding-bottom: 6px; border-bottom: 2px solid #06C755; }
   .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 16px; }
@@ -259,30 +259,24 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   button { padding: 9px 14px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; background: #06C755; color: #fff; }
   button.sub { background: #eee; color: #333; }
   button.mini { background: #eee; color: #444; padding: 4px 10px; font-size: 12px; }
-  .calhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; font-size: 15px; }
-  .calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-  .calgrid .wd { text-align: center; font-size: 12px; color: #888; padding: 4px 0; }
-  .calgrid .wd.sat { color: #3b7dd8; }
-  .calgrid .wd.sun { color: #d84b4b; }
-  .day { padding: 9px 0; text-align: center; font-size: 14px; border: 1px solid #e4e4e4; border-radius: 8px; background: #fff; cursor: pointer; user-select: none; }
-  .day:hover { border-color: #06C755; }
-  .day.sel { background: #06C755; color: #fff; border-color: #06C755; font-weight: 600; }
-  .day.today { border-color: #06C755; border-width: 2px; }
-  .day.past { color: #c8c8c8; background: #fafafa; cursor: default; }
-  .day.past:hover { border-color: #e4e4e4; }
-  .day.blank { border: none; background: none; cursor: default; }
-  button.danger { background: #fff; color: #c00; border: 1px solid #e0b4b4; padding: 3px 9px; font-size: 12px; }
-  .dateblock { border: 1px solid #e6e6e6; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
-  .dateblock.empty { background: #fcfcfc; border-style: dashed; }
-  .datehead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-  .datename { font-weight: 600; font-size: 15px; }
-  .datename .n { font-weight: normal; font-size: 12px; color: #888; margin-left: 8px; }
-  .slot input { display: none; }
-  .slot span { display: inline-block; padding: 6px 10px; border: 1px solid #ccc; border-radius: 18px; font-size: 13px; cursor: pointer; margin: 3px 3px 0 0; background: #fff; }
-  .slot input:checked + span { background: #06C755; color: #fff; border-color: #06C755; }
-  .bulk { background: #f6f8fa; border: 1px solid #e2e6ea; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
-  .lbl { font-size: 13px; color: #555; margin-bottom: 6px; }
-  #preview { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
+
+  .wkhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; font-size: 15px; }
+  .wk { display: grid; grid-template-columns: 52px repeat(7, 1fr); gap: 2px; user-select: none; touch-action: none; }
+  .wk .hd { text-align: center; font-size: 12px; padding: 5px 0 7px; font-weight: 600; cursor: pointer; border-radius: 6px; line-height: 1.4; }
+  .wk .hd:hover { background: #f0f9f3; }
+  .wk .hd.sat { color: #3b7dd8; }
+  .wk .hd.sun { color: #d84b4b; }
+  .wk .hd.today { background: #eaf7ef; }
+  .wk .hd.pasthd { color: #ccc; cursor: default; }
+  .wk .hd.pasthd:hover { background: none; }
+  .wk .tl { font-size: 11px; color: #999; text-align: right; padding-right: 6px; line-height: 26px; }
+  .wk .cell { height: 26px; border: 1px solid #e8e8e8; border-radius: 4px; background: #fff; cursor: pointer; }
+  .wk .cell:hover { border-color: #9bdcb5; }
+  .wk .cell.sel { background: #06C755; border-color: #06C755; }
+  .wk .cell.past { background: #f6f6f6; border-color: #f0f0f0; cursor: default; }
+  .wk .cell.past:hover { border-color: #f0f0f0; }
+
+  #preview { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow-y: auto; }
   #preview li { padding: 6px 4px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
   #preview li.head { font-weight: 600; color: #06783b; background: #f6fbf8; border-bottom: none; padding-top: 10px; }
   .muted { color: #888; font-size: 13px; }
@@ -296,42 +290,27 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <body>
 <h1>日程調整Bot 管理画面</h1>
 
-<h2>1. 日付を選ぶ</h2>
+<h2>1. 候補の時間をドラッグで選ぶ</h2>
 <div class="card">
-  <div class="calhead">
-    <button class="mini" onclick="moveMonth(-1)">‹ 前の月</button>
-    <span id="calTitle"></span>
-    <button class="mini" onclick="moveMonth(1)">次の月 ›</button>
+  <div class="wkhead">
+    <button class="mini" onclick="moveWeek(-1)">‹ 前の週</button>
+    <span id="wkTitle"></span>
+    <button class="mini" onclick="moveWeek(1)">次の週 ›</button>
   </div>
-  <div class="calgrid" id="calWeekdays"></div>
-  <div class="calgrid" id="calDays"></div>
+  <div class="wk" id="grid"></div>
   <div class="row" style="margin-top:12px">
-    <button class="sub" onclick="addWeekdays()">今後2週間の平日を追加</button>
-    <button class="sub" onclick="clearDates()">選択をすべて解除</button>
+    <span class="muted">ドラッグで範囲選択・日付をクリックでその日を一括選択／解除できます</span>
+    <button class="mini" onclick="clearAll()">すべて解除</button>
   </div>
 </div>
 
-<h2>2. 日付ごとに時間を選ぶ</h2>
-<div class="card">
-  <div class="bulk">
-    <div class="lbl">一括操作（ここで選んだ時間をまとめて反映できます）</div>
-    <div id="bulkSlots"></div>
-    <div class="row" style="margin-top:10px">
-      <button class="mini" onclick="applyBulk('set')">全日付をこの内容にする</button>
-      <button class="mini" onclick="applyBulk('add')">全日付に追加する</button>
-      <button class="mini" onclick="clearAllSlots()">全日付をクリア</button>
-    </div>
-  </div>
-  <div id="dateBlocks"></div>
-</div>
-
-<h2>3. 送信内容のプレビュー</h2>
+<h2>2. 送信内容のプレビュー</h2>
 <div class="card">
   <div class="muted" id="count">候補: 0件</div>
   <ul id="preview"></ul>
 </div>
 
-<h2>4. 送信先を選ぶ</h2>
+<h2>3. 送信先を選ぶ</h2>
 <div class="card">
   <div class="row" style="margin-bottom:8px">
     <button class="sub" onclick="toggleAll(true)">全員選択</button>
@@ -340,7 +319,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div id="members" class="muted">読み込み中...</div>
 </div>
 
-<h2>5. 送信</h2>
+<h2>4. 送信</h2>
 <div class="card">
   <button onclick="send()" id="sendBtn">この内容でLINEに送信する</button>
   <div id="result"></div>
@@ -353,129 +332,130 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const WD = ['日','月','火','水','木','金','土'];
-// 1時間単位の選択肢（8:00〜22:00）
-const SLOTS = Array.from({ length: 15 }, (_, i) => String(i + 8).padStart(2, '0') + ':00');
-let bulkSel = [];
-let dates = [];   // [{ d: '2026-08-03', slots: ['10:00'] }]
-let view = new Date();   // カレンダーで表示中の月
+const HOURS = Array.from({ length: 15 }, (_, i) => String(i + 8).padStart(2, '0') + ':00');
 
+let selected = new Set();      // "2026-08-03 14:00"
+let weekStart = startOfWeek(new Date());
+let dragging = false, dragMode = 'on';
+
+function ymd(dt) {
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
 function fmt(d) {
   const dt = new Date(d + 'T00:00:00');
   return (dt.getMonth() + 1) + '/' + dt.getDate() + '(' + WD[dt.getDay()] + ')';
 }
-function ymd(dt) {
-  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+function startOfWeek(dt) {
+  const d = new Date(dt); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d;
 }
-function sortDates() { dates.sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0); }
-function toggleDate(d) {
-  if (dates.some(x => x.d === d)) dates = dates.filter(x => x.d !== d);
-  else { dates.push({ d: d, slots: bulkSel.slice() }); sortDates(); }
-  render();
-}
-function clearDates() { dates = []; render(); }
-function moveMonth(diff) {
-  view.setMonth(view.getMonth() + diff);
-  renderCalendar();
-}
-function renderCalendar() {
-  const y = view.getFullYear(), m = view.getMonth();
-  document.getElementById('calTitle').textContent = y + '年' + (m + 1) + '月';
-  document.getElementById('calWeekdays').innerHTML = WD.map((w, i) =>
-    `<div class="wd ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</div>`
-  ).join('');
-
-  const first = new Date(y, m, 1).getDay();
-  const last = new Date(y, m + 1, 0).getDate();
-  const todayStr = ymd(new Date());
-
-  let cells = Array.from({ length: first }, () => '<div class="day blank"></div>');
-  for (let d = 1; d <= last; d++) {
-    const s = ymd(new Date(y, m, d));
-    const cls = ['day'];
-    if (dates.some(x => x.d === s)) cls.push('sel');
-    if (s === todayStr) cls.push('today');
-    if (s < todayStr) cls.push('past');
-    const click = s < todayStr ? '' : ` onclick="toggleDate('${s}')"`;
-    cells.push(`<div class="${cls.join(' ')}"${click}>${d}</div>`);
-  }
-  document.getElementById('calDays').innerHTML = cells.join('');
-}
-function addWeekdays() {
-  const today = new Date();
-  for (let i = 1; i <= 14; i++) {
-    const dt = new Date(today); dt.setDate(today.getDate() + i);
-    if (dt.getDay() === 0 || dt.getDay() === 6) continue;
-    const s = ymd(dt);
-    if (!dates.some(x => x.d === s)) dates.push({ d: s, slots: bulkSel.slice() });
-  }
-  sortDates(); render();
-}
-function removeDate(d) { dates = dates.filter(x => x.d !== d); render(); }
-function toggleSlot(d, label, on) {
-  const item = dates.find(x => x.d === d);
-  if (!item) return;
-  item.slots = on ? item.slots.concat(item.slots.includes(label) ? [] : [label])
-                  : item.slots.filter(s => s !== label);
-  render();
-}
-function toggleBulk(label, on) {
-  bulkSel = on ? bulkSel.concat(bulkSel.includes(label) ? [] : [label])
-               : bulkSel.filter(s => s !== label);
-  render();
-}
-function applyBulk(mode) {
-  if (!dates.length) { alert('先に日付を追加してください。'); return; }
-  if (!bulkSel.length) { alert('一括操作エリアで時間を選んでください。'); return; }
-  dates.forEach(x => {
-    if (mode === 'set') x.slots = bulkSel.slice();
-    else bulkSel.forEach(s => { if (!x.slots.includes(s)) x.slots.push(s); });
+function weekDays() {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return ymd(d);
   });
-  render();
 }
-function clearAllSlots() { dates.forEach(x => x.slots = []); render(); }
-function ordered(slots) { return SLOTS.filter(s => slots.includes(s)); }
-function candidates() {
-  const out = [];
-  for (const x of dates) for (const t of ordered(x.slots)) out.push(fmt(x.d) + ' ' + t);
-  return out;
-}
-function chips(selected, onchange) {
-  return SLOTS.map(s =>
-    `<label class="slot"><input type="checkbox" ${selected.includes(s) ? 'checked' : ''} onchange="${onchange}('${s}', this.checked)"><span>${s}</span></label>`
-  ).join('');
-}
-function render() {
-  renderCalendar();
-  document.getElementById('bulkSlots').innerHTML = chips(bulkSel, 'toggleBulk');
+function moveWeek(diff) { weekStart.setDate(weekStart.getDate() + diff * 7); renderGrid(); }
+function clearAll() { selected.clear(); renderGrid(); renderPreview(); }
 
-  document.getElementById('dateBlocks').innerHTML = dates.length
-    ? dates.map(x => `
-        <div class="dateblock ${x.slots.length ? '' : 'empty'}">
-          <div class="datehead">
-            <span class="datename">${fmt(x.d)}<span class="n">${x.slots.length ? x.slots.length + '件' : '時間未選択（送信されません）'}</span></span>
-            <button class="danger" onclick="removeDate('${x.d}')">削除</button>
-          </div>
-          <div>${SLOTS.map(s =>
-            `<label class="slot"><input type="checkbox" ${x.slots.includes(s) ? 'checked' : ''} onchange="toggleSlot('${x.d}', '${s}', this.checked)"><span>${s}</span></label>`
-          ).join('')}</div>
-        </div>`).join('')
-    : '<span class="muted">まだ日付が追加されていません。</span>';
+function renderGrid() {
+  const days = weekDays();
+  const today = ymd(new Date());
+  document.getElementById('wkTitle').textContent = fmt(days[0]) + ' 〜 ' + fmt(days[6]);
 
-  const list = candidates();
-  document.getElementById('count').textContent = '候補: ' + list.length + '件';
-  if (!list.length) {
-    document.getElementById('preview').innerHTML = '<li class="muted">日付と時間を選ぶとここに表示されます</li>';
+  let html = '<div class="tl"></div>';
+  days.forEach((d, i) => {
+    const cls = ['hd'];
+    if (i === 0) cls.push('sun');
+    if (i === 6) cls.push('sat');
+    if (d === today) cls.push('today');
+    if (d < today) cls.push('pasthd');
+    const click = d < today ? '' : ` onclick="toggleDay('${d}')"`;
+    html += `<div class="${cls.join(' ')}"${click}>${fmt(d).replace('(', '<br>(')}</div>`;
+  });
+
+  for (const h of HOURS) {
+    html += `<div class="tl">${h}</div>`;
+    for (const d of days) {
+      const key = d + ' ' + h;
+      const past = d < today;
+      const cls = 'cell' + (selected.has(key) ? ' sel' : '') + (past ? ' past' : '');
+      html += `<div class="${cls}"${past ? '' : ` data-key="${key}"`}></div>`;
+    }
+  }
+  document.getElementById('grid').innerHTML = html;
+}
+function toggleDay(d) {
+  const keys = HOURS.map(h => d + ' ' + h);
+  const allOn = keys.every(k => selected.has(k));
+  keys.forEach(k => allOn ? selected.delete(k) : selected.add(k));
+  renderGrid(); renderPreview();
+}
+function applyCell(el) {
+  const key = el.dataset.key;
+  if (!key) return;
+  if (dragMode === 'on') { selected.add(key); el.classList.add('sel'); }
+  else { selected.delete(key); el.classList.remove('sel'); }
+}
+function renderPreview() {
+  const keys = Array.from(selected).sort();
+  document.getElementById('count').textContent = '候補: ' + keys.length + '件';
+  if (!keys.length) {
+    document.getElementById('preview').innerHTML = '<li class="muted">グリッドをドラッグすると、ここに候補が表示されます</li>';
     return;
   }
-  let html = '', n = 0;
-  for (const x of dates) {
-    const os = ordered(x.slots);
-    if (!os.length) continue;
-    html += `<li class="head">${fmt(x.d)}</li>`;
-    for (const t of os) { n++; html += `<li>${n}. ${fmt(x.d)} ${t}</li>`; }
+  let html = '', lastDay = '', n = 0;
+  for (const k of keys) {
+    const [d, t] = k.split(' ');
+    if (d !== lastDay) { html += `<li class="head">${fmt(d)}</li>`; lastDay = d; }
+    n++;
+    html += `<li>${n}. ${fmt(d)} ${t}</li>`;
   }
   document.getElementById('preview').innerHTML = html;
 }
+function candidates() {
+  return Array.from(selected).sort().map(k => {
+    const [d, t] = k.split(' ');
+    return fmt(d) + ' ' + t;
+  });
+}
+
+// --- ドラッグ選択（マウス／タッチ） ---
+const grid = document.getElementById('grid');
+grid.addEventListener('mousedown', e => {
+  const el = e.target.closest('.cell[data-key]');
+  if (!el) return;
+  e.preventDefault();
+  dragging = true;
+  dragMode = selected.has(el.dataset.key) ? 'off' : 'on';
+  applyCell(el);
+});
+grid.addEventListener('mouseover', e => {
+  if (!dragging) return;
+  const el = e.target.closest('.cell[data-key]');
+  if (el) applyCell(el);
+});
+document.addEventListener('mouseup', () => {
+  if (dragging) { dragging = false; renderPreview(); }
+});
+grid.addEventListener('touchstart', e => {
+  const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+  const cell = el && el.closest('.cell[data-key]');
+  if (!cell) return;
+  e.preventDefault();
+  dragging = true;
+  dragMode = selected.has(cell.dataset.key) ? 'off' : 'on';
+  applyCell(cell);
+}, { passive: false });
+grid.addEventListener('touchmove', e => {
+  if (!dragging) return;
+  e.preventDefault();
+  const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+  const cell = el && el.closest('.cell[data-key]');
+  if (cell) applyCell(cell);
+}, { passive: false });
+document.addEventListener('touchend', () => {
+  if (dragging) { dragging = false; renderPreview(); }
+});
+
 function toggleAll(on) {
   document.querySelectorAll('#members input[type=checkbox]').forEach(cb => cb.checked = on);
 }
@@ -499,7 +479,7 @@ async function loadMembers() {
 async function send() {
   const list = candidates();
   const box = document.getElementById('result');
-  if (!list.length) { box.className = 'err'; box.textContent = '候補が0件です。日付ごとに時間を選んでください。'; return; }
+  if (!list.length) { box.className = 'err'; box.textContent = '候補が0件です。グリッドから時間を選んでください。'; return; }
   const to = Array.from(document.querySelectorAll('#members input[type=checkbox]:checked')).map(cb => cb.value);
   if (!to.length) { box.className = 'err'; box.textContent = '送信先が選ばれていません。'; return; }
   if (!confirm(list.length + '件の候補を' + to.length + '人に送信します。よろしいですか？')) return;
@@ -522,7 +502,8 @@ async function send() {
 }
 function go(path) { location.href = '/admin/' + path + '?token=' + encodeURIComponent(TOKEN); }
 
-render();
+renderGrid();
+renderPreview();
 loadMembers();
 </script>
 </body>
