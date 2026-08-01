@@ -408,34 +408,6 @@ def auto_assign(
     }
 
 
-def free_slots_next_to_bookings(candidates: list[str], schedule: list[dict], location: str = "") -> list[str]:
-    """確定済みの枠のすぐ前後にある空き枠だけを返す。
-    予定が飛び飛びにならないよう、離れた時間帯は候補にしない。
-    location を指定すると、その教室の枠に隣接するものだけに絞る（移動時間の都合）。"""
-    occupied: dict[tuple, str] = {}
-    for s in schedule:
-        for h in _covered_hours(s["start_unit"], s["length"]):
-            occupied[(s["day"], h)] = _base_location(s.get("location", ""))
-
-    want = _base_location(location)
-    result = []
-    for c in candidates:
-        day, _ = split_slot(c)
-        hour = slot_hour(c)
-        if (day, hour) in occupied:
-            continue
-        for nb in ((day, hour - 1), (day, hour + 1)):
-            if nb not in occupied:
-                continue
-            here = occupied[nb]
-            # 教室が指定されている場合、同じ教室の枠に隣接するものだけ
-            if want and here and want != here and location != ANY_LOCATION:
-                continue
-            result.append(c)
-            break
-    return result
-
-
 def check_conflicts(result: dict) -> list[str]:
     """時間の重複・教室間の間隔不足がないか検算する。"""
     problems = []
