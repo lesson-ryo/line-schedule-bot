@@ -137,7 +137,12 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   h2 .req { font-size: 11px; color: #fff; background: #e05252; border-radius: 4px; padding: 2px 6px; margin-left: 6px; vertical-align: middle; }
   textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-family: inherit; resize: vertical; }
   #deadline { background: #fff6e5; border: 1px solid #f0d9a8; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; display: none; }
-  #editNote { background: #eef6ff; border: 1px solid #cfe2f7; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; display: none; }
+  #editNote { background: #eaf3ff; border: 2px solid #4a90d9; border-radius: 10px;
+              padding: 14px; margin-bottom: 16px; display: none; }
+  #editNote .ttl { font-size: 17px; font-weight: 700; color: #1a5c9e; display: flex; align-items: center; gap: 8px; }
+  #editNote .ttl .mk { display: inline-block; width: 24px; height: 24px; border-radius: 50%;
+                       background: #4a90d9; color: #fff; font-size: 15px; line-height: 24px; text-align: center; }
+  #editNote .sub { font-size: 14px; color: #33506e; margin-top: 8px; line-height: 1.5; }
   #done { display: none; }
   .donebox { background: #f0f9f3; border: 2px solid #06C755; border-radius: 12px; padding: 20px 16px; text-align: center; }
   .donemark { width: 52px; height: 52px; border-radius: 50%; background: #06C755; color: #fff;
@@ -290,7 +295,9 @@ async function loadPrevious() {
     if (prev.comment) document.getElementById("comment").value = prev.comment;
 
     const note = document.getElementById("editNote");
-    note.textContent = "回答済みです。前回の内容を表示しています。変更したら、もう一度送信してください。";
+    note.innerHTML =
+      '<div class="ttl"><span class="mk">✓</span>回答済みです</div>' +
+      '<div class="sub">前回の内容を表示しています。<br>変更する場合は選び直して、下の「この内容に更新する」を押してください。</div>';
     note.style.display = "block";
     document.getElementById("submitBtn").textContent = "この内容に更新する";
   } catch (e) {}
