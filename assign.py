@@ -379,6 +379,7 @@ def auto_assign(
                     "attend": attend,
                     "total": len(e["members"]),
                     "absent": absent,
+                    "member_ids": list(e["member_ids"]),
                     "start_unit": start,
                     "length": length,
                 }

@@ -33,6 +33,7 @@ from linebot.v3.messaging import (
     PushMessageRequest,
     FlexMessage,
     FlexContainer,
+    TextMessage,
 )
 
 from storage import load_json, save_json
@@ -191,6 +192,59 @@ def send_schedule(
             )
     names = [m["display_name"] for m in target_members]
     return f"{len(target_members)}人に日程候補（{mode_label}）を送信しました。\n送信先: {names}\n候補: {candidates}"
+
+
+DEFAULT_NOTIFY_MESSAGE = "レッスン日程が確定しましたのでお知らせします。"
+
+
+def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
+    """割り当て結果から、1人ずつに送る本文を組み立てる。
+    戻り値: [{"user_ids": [...], "name": 表示名, "text": 本文}, ...]"""
+    intro = (message or DEFAULT_NOTIFY_MESSAGE).strip()
+    items = []
+
+    for s in schedule:
+        lines = [intro, ""]
+        if s.get("is_group"):
+            lines.append(f"グループ: {s['name']}")
+        lines.append(f"日時: {s['day']} {s['time']}-{s['end']}")
+        if s.get("location"):
+            lines.append(f"教室: {s['location']}")
+
+        items.append(
+            {
+                "user_ids": list(s.get("member_ids", [])),
+                "name": s["name"],
+                "text": "\n".join(lines),
+            }
+        )
+    return items
+
+
+def send_notifications(items: list[dict]) -> str:
+    """組み立てた本文を各自にPush送信する（1人1通）"""
+    if not items:
+        return "送信する内容がありません。先に割り当てを実行してください。"
+
+    sent, failed = 0, []
+    with ApiClient(configuration) as api_client:
+        line_api = MessagingApi(api_client)
+        for item in items:
+            for user_id in item["user_ids"]:
+                try:
+                    line_api.push_message(
+                        PushMessageRequest(to=user_id, messages=[TextMessage(text=item["text"])])
+                    )
+                    sent += 1
+                except Exception as e:
+                    failed.append(f"{item['name']}: {e}")
+
+    lines = [f"{sent}通を送信しました。"]
+    if failed:
+        lines.append("")
+        lines.append("送信できなかった分:")
+        lines.extend(f"  {f}" for f in failed)
+    return "\n".join(lines)
 
 
 def _location_lines() -> list[str]:

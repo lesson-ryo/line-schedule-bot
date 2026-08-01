@@ -13,6 +13,7 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 import os
 import requests
 from datetime import datetime
+from urllib.parse import quote
 
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
@@ -519,6 +520,19 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<h2>6. 確定した日程を各自に送る</h2>
+<div class="card">
+  <div class="lbl">通知メッセージの前置き</div>
+  <textarea id="notifyMessage" rows="2" oninput="saveNotifyMessage()"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button class="sub" onclick="goNotify()">送信内容を確認する</button>
+    <button class="mini" onclick="resetNotifyMessage()">初期文に戻す</button>
+  </div>
+  <div class="muted" style="margin-top:8px">
+    各自に自分の枠だけが届きます。確認画面が出てから送信されます。
+  </div>
+</div>
+
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const WD = ['日','月','火','水','木','金','土'];
@@ -772,6 +786,23 @@ async function send() {
   btn.disabled = false; btn.textContent = 'この内容でLINEに送信する';
 }
 function go(path) { location.href = '/admin/' + path + '?token=' + encodeURIComponent(TOKEN); }
+const DEFAULT_NOTIFY = 'レッスン日程が確定しましたのでお知らせします。';
+function notifyBox() { return document.getElementById('notifyMessage'); }
+function saveNotifyMessage() {
+  try { localStorage.setItem('scheduleBotNotify', notifyBox().value); } catch (e) {}
+}
+function resetNotifyMessage() { notifyBox().value = DEFAULT_NOTIFY; saveNotifyMessage(); }
+function initNotify() {
+  let saved = '';
+  try { saved = localStorage.getItem('scheduleBotNotify') || ''; } catch (e) {}
+  notifyBox().value = saved || DEFAULT_NOTIFY;
+}
+function goNotify() {
+  const msg = notifyBox().value.trim() || DEFAULT_NOTIFY;
+  location.href = '/admin/notify?token=' + encodeURIComponent(TOKEN)
+    + '&message=' + encodeURIComponent(msg);
+}
+
 function runAssign() {
   const qs = Array.from(document.querySelectorAll('#members .quota')).map(i => i.value || '1');
   if (!qs.length) { alert('メンバーがまだ登録されていません。'); return; }
@@ -782,6 +813,7 @@ function runAssign() {
 }
 
 initMessage();
+initNotify();
 renderGrid();
 renderPreview();
 loadMembers();
@@ -842,9 +874,58 @@ def admin_assign():
     locations = {l["user_id"]: l["location"] for l in load_json("locations")}
     result = assign_mod.auto_assign(candidates, votes, quotas, locations, groups)
 
+    # 通知で使えるように結果を保存しておく
+    save_json("assignment", result.get("schedule", []))
+
     panel = f"/admin/panel?token={ADMIN_TOKEN}"
     body = assign_mod.format_result(result)
-    return f'<pre>{body}</pre><p><a href="{panel}">管理画面に戻る</a></p>'
+    notify = f"/admin/notify?token={ADMIN_TOKEN}"
+    links = f'<p><a href="{notify}">この内容を各自にLINEで送る</a>　<a href="{panel}">管理画面に戻る</a></p>'
+    return f"<pre>{body}</pre>{links}"
+
+
+@app.route("/admin/notify", methods=["GET"])
+def admin_notify():
+    """割り当て結果を各自にLINEで通知する。
+    確認なしで送らないよう、まずプレビューを表示し &send=1 で実際に送信する。"""
+    check_admin_token()
+    from schedule_tools import build_notifications, send_notifications, DEFAULT_NOTIFY_MESSAGE
+
+    schedule = load_json("assignment", default=[])
+    if not schedule:
+        return (
+            "<pre>送信できる割り当て結果がありません。先に「時間枠を自動で割り当てる」を実行してください。</pre>"
+            f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
+        )
+
+    message = request.args.get("message", "") or load_json("notify_message", default="")
+    save_json("notify_message", message)
+    items = build_notifications(schedule, message)
+
+    if request.args.get("send") == "1":
+        result = send_notifications(items)
+        return (
+            f"<pre>{result}</pre>"
+            f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
+        )
+
+    total = sum(len(i["user_ids"]) for i in items)
+    preview = [f"{total}通を送信します。内容を確認してください。", ""]
+    for i in items:
+        preview.append(f"── {i['name']}（{len(i['user_ids'])}人）")
+        preview.append(i["text"])
+        preview.append("")
+
+    send_url = (
+        f"/admin/notify?token={ADMIN_TOKEN}&send=1&message={quote(message or DEFAULT_NOTIFY_MESSAGE)}"
+    )
+    return (
+        f"<pre>{chr(10).join(preview)}</pre>"
+        f'<p><a href="{send_url}" '
+        f"onclick=\"return confirm('{total}通を送信します。よろしいですか？')\">"
+        f"この内容で送信する</a>　"
+        f'<a href="/admin/panel?token={ADMIN_TOKEN}">やめる</a></p>'
+    )
 
 
 @app.route("/admin/members", methods=["GET"])
