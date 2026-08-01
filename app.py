@@ -35,6 +35,17 @@ LIFF_ID = os.environ.get("LIFF_ID", "")
 LINE_CHANNEL_ID = os.environ.get("LINE_CHANNEL_ID", "")
 # 管理画面の見出しに表示する名前（関西用・関東用など複数運用時の見分け用）
 PANEL_NAME = os.environ.get("PANEL_NAME", "日程調整Bot")
+# 回答フォームで選ばせる教室。「|」区切りで指定する（未設定なら教室選択は表示しない）
+LOCATIONS = [s.strip() for s in os.environ.get("LOCATIONS", "").split("|") if s.strip()]
+
+
+def format_date_ja(value: str) -> str:
+    """'2026-08-05' → '8/5(火)'。変換できない場合はそのまま返す。"""
+    try:
+        d = datetime.strptime(value, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return value or ""
+    return f"{d.month}/{d.day}({'月火水木金土日'[d.weekday()]})"
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -113,12 +124,20 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   button { width: 100%; padding: 14px; font-size: 16px; background: #06C755; color: #fff; border: none; border-radius: 8px; margin-top: 16px; }
   #status { margin-top: 12px; color: #666; }
   h2 { font-size: 15px; margin: 22px 0 6px; }
+  h2 .req { font-size: 11px; color: #fff; background: #e05252; border-radius: 4px; padding: 2px 6px; margin-left: 6px; vertical-align: middle; }
   textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-family: inherit; resize: vertical; }
+  #deadline { background: #fff6e5; border: 1px solid #f0d9a8; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; display: none; }
 </style>
 </head>
 <body>
+<div id="deadline"></div>
 <h1>都合の良い日程をすべて選んでください</h1>
 <form id="form"></form>
+
+<div id="locationBox" style="display:none">
+  <h2>教室<span class="req">必須</span></h2>
+  <div id="locations"></div>
+</div>
 
 <div id="commentBox" style="display:none">
   <h2>（任意）連絡事項やリクエストあれば</h2>
@@ -142,10 +161,27 @@ async function main() {
   const data = await res.json();
   candidates = data.candidates || [];
   const form = document.getElementById("form");
+
+  if (data.deadline) {
+    const box = document.getElementById("deadline");
+    box.textContent = "回答期限: " + data.deadline;
+    box.style.display = "block";
+  }
+
   if (candidates.length === 0) {
     document.getElementById("status").textContent = "現在、回答可能な日程候補がありません。";
     document.getElementById("submitBtn").style.display = "none";
     return;
+  }
+
+  const locs = data.locations || [];
+  if (locs.length) {
+    document.getElementById("locations").innerHTML = locs.map((l, i) => `
+      <label>
+        <input type="radio" name="location" value="${l}">${l}
+      </label>
+    `).join("");
+    document.getElementById("locationBox").style.display = "block";
   }
   form.innerHTML = candidates.map((c, i) => `
     <label>
@@ -158,6 +194,15 @@ async function main() {
 
 document.getElementById("submitBtn").addEventListener("click", async () => {
   const checked = Array.from(document.querySelectorAll('input[name="candidate"]:checked')).map(el => parseInt(el.value, 10));
+
+  const locBox = document.getElementById("locationBox");
+  const locEl = document.querySelector('input[name="location"]:checked');
+  if (locBox.style.display !== "none" && !locEl) {
+    document.getElementById("status").textContent = "教室を選択してください。";
+    locBox.scrollIntoView({ block: "center" });
+    return;
+  }
+
   document.getElementById("status").textContent = "送信中...";
   try {
     const idToken = liff.getIDToken();
@@ -168,6 +213,7 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
         idToken: idToken,
         selected: checked,
         comment: document.getElementById("comment").value,
+        location: locEl ? locEl.value : "",
       }),
     });
     const data = await res.json();
@@ -201,7 +247,11 @@ def liff_page():
 def liff_candidates():
     """LIFFフォームが現在の候補一覧を取得するための公開エンドポイント(メンバー用・認証不要・読み取り専用)"""
     candidates = load_json("candidates", default=[])
-    return {"candidates": candidates}
+    return {
+        "candidates": candidates,
+        "locations": LOCATIONS,
+        "deadline": format_date_ja(load_json("deadline", default="")),
+    }
 
 
 @app.route("/liff/submit", methods=["POST"])
@@ -246,6 +296,17 @@ def liff_submit():
             }
         )
     save_json("votes", votes)
+
+    # 教室（設定されている場合は必須）
+    if LOCATIONS:
+        location = (body.get("location") or "").strip()
+        if location not in LOCATIONS:
+            return {"error": "教室を選択してください。"}, 400
+        locations = [l for l in load_json("locations") if l["user_id"] != user_id]
+        locations.append(
+            {"user_id": user_id, "display_name": display_name, "location": location}
+        )
+        save_json("locations", locations)
 
     # 自由記述（任意）。同じ人が再送信したら上書きする。
     comment = (body.get("comment") or "").strip()[:500]
@@ -340,12 +401,17 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<h2>2. メッセージを編集する</h2>
+<h2>2. メッセージと回答期限</h2>
 <div class="card">
   <textarea id="message" rows="3" placeholder="メンバーに表示されるメッセージ"></textarea>
   <div class="row" style="margin-top:8px">
     <span class="muted">候補ボタンの上に表示されます</span>
     <button class="mini" onclick="resetMessage()">初期文に戻す</button>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <span class="muted">回答期限</span>
+    <input type="date" id="deadline" onchange="onMessageInput()">
+    <button class="mini" onclick="clearDeadline()">なしにする</button>
   </div>
 </div>
 
@@ -356,6 +422,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
     <div class="bubblesub" id="count">候補: 0件</div>
     <div class="bubblebtn">日程を選ぶ</div>
   </div>
+  <div class="muted" id="deadlinePreview" style="margin:-6px 0 12px"></div>
   <ul id="preview"></ul>
 </div>
 
@@ -450,15 +517,31 @@ const DEFAULT_MESSAGE = '日程調整のお願いです。ボタンをタップ�
 const msgBox = document.getElementById('message');
 
 function currentMessage() { return msgBox.value.trim() || DEFAULT_MESSAGE; }
+function deadlineJa() {
+  const v = document.getElementById('deadline').value;
+  if (!v) return '';
+  const dt = new Date(v + 'T00:00:00');
+  return (dt.getMonth() + 1) + '/' + dt.getDate() + '(' + WD[dt.getDay()] + ')';
+}
 function onMessageInput() {
   document.getElementById('msgPreview').textContent = currentMessage();
-  try { localStorage.setItem('scheduleBotMessage', msgBox.value); } catch (e) {}
+  const d = deadlineJa();
+  document.getElementById('deadlinePreview').textContent = d ? '本文の最後に「回答期限: ' + d + '」が入ります' : '';
+  try {
+    localStorage.setItem('scheduleBotMessage', msgBox.value);
+    localStorage.setItem('scheduleBotDeadline', document.getElementById('deadline').value);
+  } catch (e) {}
 }
+function clearDeadline() { document.getElementById('deadline').value = ''; onMessageInput(); }
 function resetMessage() { msgBox.value = DEFAULT_MESSAGE; onMessageInput(); }
 function initMessage() {
-  let saved = '';
-  try { saved = localStorage.getItem('scheduleBotMessage') || ''; } catch (e) {}
+  let saved = '', savedDl = '';
+  try {
+    saved = localStorage.getItem('scheduleBotMessage') || '';
+    savedDl = localStorage.getItem('scheduleBotDeadline') || '';
+  } catch (e) {}
   msgBox.value = saved || DEFAULT_MESSAGE;
+  if (savedDl) document.getElementById('deadline').value = savedDl;
   msgBox.addEventListener('input', onMessageInput);
   onMessageInput();
 }
@@ -564,7 +647,8 @@ async function send() {
     const url = '/admin/send?token=' + encodeURIComponent(TOKEN)
       + '&candidates=' + encodeURIComponent(list.join('|'))
       + '&to=' + to.join(',')
-      + '&message=' + encodeURIComponent(currentMessage());
+      + '&message=' + encodeURIComponent(currentMessage())
+      + '&deadline=' + encodeURIComponent(document.getElementById('deadline').value);
     const res = await fetch(url);
     const text = await res.text();
     box.className = res.ok ? 'ok' : 'err';
@@ -664,7 +748,11 @@ def admin_send():
 
     message = request.args.get("message", "")
 
-    result = send_schedule(candidates, member_indices, message)
+    # 締め切り日（YYYY-MM-DD）。フォーム上部とLINE本文の末尾に表示する。
+    deadline_raw = request.args.get("deadline", "").strip()
+    save_json("deadline", deadline_raw)
+
+    result = send_schedule(candidates, member_indices, message, format_date_ja(deadline_raw))
     return f"<pre>{result}</pre>"
 
 

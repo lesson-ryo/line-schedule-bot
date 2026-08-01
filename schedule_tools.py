@@ -88,10 +88,12 @@ def build_flex_contents(candidates: list[str]) -> dict:
 DEFAULT_MESSAGE = "日程調整のお願いです。ボタンをタップして、都合の良い日程をすべて選んでください。"
 
 
-def build_liff_link_contents(num_candidates: int, message: str = "") -> dict:
+def build_liff_link_contents(num_candidates: int, message: str = "", deadline: str = "") -> dict:
     """ボタン1つだけ(LIFFフォームを開く)のシンプルなFlex Message。
-    messageを指定するとメッセージ本文を差し替えられる。"""
+    messageを指定するとメッセージ本文を、deadlineを指定すると末尾に回答期限を入れられる。"""
     body = (message or DEFAULT_MESSAGE).strip()
+    if deadline:
+        body = f"{body}\n\n回答期限: {deadline}"
     return {
         "type": "bubble",
         "body": {
@@ -144,6 +146,7 @@ def send_schedule(
     candidates: list[str],
     member_indices: list[int] | None = None,
     message: str = "",
+    deadline: str = "",
 ) -> str:
     """日程候補ボタン付きメッセージをPush送信する（Push APIなので無料通数を消費）。
     member_indices を指定すると list_members() の番号で送信先を絞り込める。省略時は全員に送信。
@@ -167,7 +170,7 @@ def send_schedule(
                 "LIFFフォームでの送信が必要ですが、環境変数 LIFF_ID が設定されていません。"
                 "LINE DevelopersでLIFFアプリを登録し、RenderにLIFF_IDを設定してください。"
             )
-        contents_dict = build_liff_link_contents(len(candidates), message)
+        contents_dict = build_liff_link_contents(len(candidates), message, deadline)
         alt_text = (message or DEFAULT_MESSAGE).strip()[:100]
         mode_label = "LIFFフォーム式"
     else:
@@ -188,6 +191,21 @@ def send_schedule(
             )
     names = [m["display_name"] for m in target_members]
     return f"{len(target_members)}人に日程候補（{mode_label}）を送信しました。\n送信先: {names}\n候補: {candidates}"
+
+
+def _location_lines() -> list[str]:
+    """回答者が選んだ教室を整形して返す"""
+    locations = load_json("locations")
+    if not locations:
+        return []
+    grouped: dict[str, list[str]] = {}
+    for l in locations:
+        grouped.setdefault(l["location"], []).append(l["display_name"])
+    lines = ["", "=== 教室 ===", ""]
+    for loc, names in grouped.items():
+        lines.append(f"■ {loc}（{len(names)}人）")
+        lines.append(f"  {', '.join(names)}")
+    return lines
 
 
 def _comment_lines() -> list[str]:
@@ -211,7 +229,7 @@ def summarize_replies() -> str:
         return "送信済みの候補が見つかりません。先に候補を送信してください。"
 
     if not votes:
-        return "\n".join(["まだ投票がありません。"] + _comment_lines())
+        return "\n".join(["まだ投票がありません。"] + _location_lines() + _comment_lines())
 
     tally = {i: [] for i in range(1, len(candidates) + 1)}
     for v in votes:
@@ -227,6 +245,7 @@ def summarize_replies() -> str:
     best = max(tally, key=lambda k: len(tally[k]))
     lines.append("")
     lines.append(f"最多得票: 候補{best}「{candidates[best-1]}」（{len(tally[best])}人）")
+    lines.extend(_location_lines())
     lines.extend(_comment_lines())
 
     return "\n".join(lines)
@@ -235,7 +254,8 @@ def summarize_replies() -> str:
 def reset_replies() -> str:
     save_json("votes", [])
     save_json("comments", [])
-    return "投票データと連絡事項をリセットしました。"
+    save_json("locations", [])
+    return "回答データ（日程・教室・連絡事項）をリセットしました。"
 
 
 if __name__ == "__main__":
