@@ -137,10 +137,37 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   h2 .req { font-size: 11px; color: #fff; background: #e05252; border-radius: 4px; padding: 2px 6px; margin-left: 6px; vertical-align: middle; }
   textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-family: inherit; resize: vertical; }
   #deadline { background: #fff6e5; border: 1px solid #f0d9a8; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; display: none; }
+  #editNote { background: #eef6ff; border: 1px solid #cfe2f7; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; display: none; }
+  #done { display: none; }
+  .donebox { background: #f0f9f3; border: 2px solid #06C755; border-radius: 12px; padding: 20px 16px; text-align: center; }
+  .donemark { width: 52px; height: 52px; border-radius: 50%; background: #06C755; color: #fff;
+              font-size: 30px; line-height: 52px; margin: 0 auto 10px; }
+  .donetitle { font-size: 18px; font-weight: 600; color: #06783b; }
+  .donesub { font-size: 13px; color: #555; margin-top: 6px; }
+  .donelist { text-align: left; background: #fff; border: 1px solid #dceee4; border-radius: 8px;
+              padding: 12px 14px; margin-top: 14px; font-size: 14px; }
+  .donelist .sec { font-weight: 600; margin: 10px 0 4px; }
+  .donelist .sec:first-child { margin-top: 0; }
+  .donelist .day { font-weight: 600; margin-top: 8px; }
+  .donelist .tm { margin-left: 12px; }
+  button.edit { background: #fff; color: #06783b; border: 1px solid #06C755; }
 </style>
 </head>
 <body>
 <div id="deadline"></div>
+
+<div id="done">
+  <div class="donebox">
+    <div class="donemark">✓</div>
+    <div class="donetitle">送信が完了しました</div>
+    <div class="donesub">この内容で受け付けました。ページを閉じてOKです。</div>
+    <div class="donelist" id="doneList"></div>
+  </div>
+  <button class="edit" onclick="backToEdit()">内容を修正する</button>
+</div>
+
+<div id="formArea">
+<div id="editNote"></div>
 <h1>都合の良い日程をすべて選んでください</h1>
 <form id="form"></form>
 
@@ -156,10 +183,12 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
 
 <button id="submitBtn">この内容で送信する</button>
 <div id="status">読み込み中...</div>
+</div>
 
 <script>
 const LIFF_ID = "__LIFF_ID__";
 let candidates = [];
+let idToken = "";
 
 function updateDayCounts() {
   document.querySelectorAll("[data-day-count]").forEach(el => {
@@ -175,6 +204,7 @@ async function main() {
     liff.login();
     return;
   }
+  idToken = liff.getIDToken();
   const res = await fetch("/liff/candidates");
   const data = await res.json();
   candidates = data.candidates || [];
@@ -227,12 +257,80 @@ async function main() {
   `).join("");
 
   form.addEventListener("change", updateDayCounts);
-  updateDayCounts();
+
   if (data.comment_label) {
     document.getElementById("commentTitle").textContent = data.comment_label;
   }
   document.getElementById("commentBox").style.display = "block";
   document.getElementById("status").textContent = "";
+
+  await loadPrevious();
+  updateDayCounts();
+}
+
+async function loadPrevious() {
+  try {
+    const res = await fetch("/liff/answers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken: idToken }),
+    });
+    if (!res.ok) return;
+    const prev = await res.json();
+    if (!prev.answered) return;
+
+    (prev.selected || []).forEach(i => {
+      const el = document.querySelector('input[name="candidate"][value="' + i + '"]');
+      if (el) el.checked = true;
+    });
+    if (prev.location) {
+      const el = document.querySelector('input[name="location"][value="' + prev.location + '"]');
+      if (el) el.checked = true;
+    }
+    if (prev.comment) document.getElementById("comment").value = prev.comment;
+
+    const note = document.getElementById("editNote");
+    note.textContent = "回答済みです。前回の内容を表示しています。変更したら、もう一度送信してください。";
+    note.style.display = "block";
+    document.getElementById("submitBtn").textContent = "この内容に更新する";
+  } catch (e) {}
+}
+
+function showDone() {
+  const picked = Array.from(document.querySelectorAll('input[name="candidate"]:checked'))
+    .map(el => candidates[parseInt(el.value, 10) - 1]);
+  const locEl = document.querySelector('input[name="location"]:checked');
+  const comment = document.getElementById("comment").value.trim();
+
+  const parts = [];
+  parts.push('<div class="sec">選んだ日時（' + picked.length + '件）</div>');
+  if (picked.length) {
+    let lastDay = "";
+    picked.forEach(c => {
+      const sp = c.lastIndexOf(" ");
+      const day = sp > 0 ? c.slice(0, sp) : c;
+      const time = sp > 0 ? c.slice(sp + 1) : "";
+      if (day !== lastDay) { parts.push('<div class="day">' + day + "</div>"); lastDay = day; }
+      parts.push('<div class="tm">' + time + "</div>");
+    });
+  } else {
+    parts.push("<div>なし</div>");
+  }
+  if (locEl) parts.push('<div class="sec">教室</div><div>' + locEl.value + "</div>");
+  if (comment) parts.push('<div class="sec">連絡事項</div><div>' + comment + "</div>");
+
+  document.getElementById("doneList").innerHTML = parts.join("");
+  document.getElementById("formArea").style.display = "none";
+  document.getElementById("done").style.display = "block";
+  window.scrollTo(0, 0);
+}
+
+function backToEdit() {
+  document.getElementById("done").style.display = "none";
+  document.getElementById("formArea").style.display = "block";
+  document.getElementById("status").textContent = "";
+  document.getElementById("submitBtn").textContent = "この内容に更新する";
+  window.scrollTo(0, 0);
 }
 
 document.getElementById("submitBtn").addEventListener("click", async () => {
@@ -248,7 +346,6 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
 
   document.getElementById("status").textContent = "送信中...";
   try {
-    const idToken = liff.getIDToken();
     const res = await fetch("/liff/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -261,7 +358,8 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
     });
     const data = await res.json();
     if (res.ok) {
-      document.getElementById("status").textContent = "送信しました。このページを閉じてOKです。";
+      document.getElementById("status").textContent = "";
+      showDone();
     } else {
       document.getElementById("status").textContent = "エラー: " + (data.error || "送信に失敗しました。");
     }
@@ -298,16 +396,11 @@ def liff_candidates():
     }
 
 
-@app.route("/liff/submit", methods=["POST"])
-def liff_submit():
-    """LIFFフォームからの投票送信を受け取る。idTokenをLINE側のverifyエンドポイントで検証し、
-    なりすましを防いだ上でこのユーザーの投票を今回選択した内容で上書きする。"""
-    body = request.get_json(silent=True) or {}
-    id_token = body.get("idToken", "")
-    selected = body.get("selected", [])
-
+def verify_liff_user(id_token: str):
+    """LIFFのIDトークンをLINE側で検証して (user_id, 表示名) を返す。
+    検証できない場合は (None, エラーメッセージ)。"""
     if not id_token:
-        return {"error": "idTokenがありません。"}, 400
+        return None, "idTokenがありません。"
 
     verify_res = requests.post(
         "https://api.line.me/oauth2/v2.1/verify",
@@ -315,13 +408,48 @@ def liff_submit():
         timeout=10,
     )
     if verify_res.status_code != 200:
-        return {"error": "認証に失敗しました。もう一度LINEアプリ内からフォームを開き直してください。"}, 401
+        return None, "認証に失敗しました。もう一度LINEアプリ内からフォームを開き直してください。"
 
     payload = verify_res.json()
     user_id = payload.get("sub", "")
-    display_name = payload.get("name", user_id)
     if not user_id:
-        return {"error": "ユーザー情報を取得できませんでした。"}, 401
+        return None, "ユーザー情報を取得できませんでした。"
+    return user_id, payload.get("name", user_id)
+
+
+@app.route("/liff/answers", methods=["POST"])
+def liff_answers():
+    """前回の回答内容を返す（フォームを開き直したときに反映するため）"""
+    body = request.get_json(silent=True) or {}
+    user_id, name_or_error = verify_liff_user(body.get("idToken", ""))
+    if not user_id:
+        return {"error": name_or_error}, 401
+
+    selected = [v["candidate_index"] for v in load_json("votes") if v["user_id"] == user_id]
+    location = next(
+        (l["location"] for l in load_json("locations") if l["user_id"] == user_id), ""
+    )
+    comment = next(
+        (c["text"] for c in load_json("comments") if c["user_id"] == user_id), ""
+    )
+    return {
+        "answered": bool(selected or location or comment),
+        "selected": sorted(selected),
+        "location": location,
+        "comment": comment,
+    }
+
+
+@app.route("/liff/submit", methods=["POST"])
+def liff_submit():
+    """LIFFフォームからの投票送信を受け取る。idTokenをLINE側のverifyエンドポイントで検証し、
+    なりすましを防いだ上でこのユーザーの投票を今回選択した内容で上書きする。"""
+    body = request.get_json(silent=True) or {}
+    selected = body.get("selected", [])
+
+    user_id, display_name = verify_liff_user(body.get("idToken", ""))
+    if not user_id:
+        return {"error": display_name}, 401
 
     upsert_member(user_id, display_name)
 
