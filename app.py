@@ -39,6 +39,18 @@ PANEL_NAME = os.environ.get("PANEL_NAME", "日程調整Bot")
 # 回答フォームで選ばせる教室。「|」区切りで指定する（未設定なら教室選択は表示しない）
 LOCATIONS = [s.strip() for s in os.environ.get("LOCATIONS", "").split("|") if s.strip()]
 
+# 生徒がテキストを送ってきたときの自動返信。
+# このBotは日程調整専用なので、それ以外の連絡は本アカウントへ誘導する。
+# 環境変数 AUTO_REPLY で差し替え可能（地域ごとに連絡先が違うため）。
+DEFAULT_AUTO_REPLY = "\n".join([
+    "このアカウントは日程調整の専用です。",
+    "",
+    "日程のご回答は、お送りしたメッセージの「日程を選ぶ」ボタンからお願いします。",
+    "",
+    "レッスンに関するご連絡・ご質問は、お手数ですが本アカウントまでお願いします。",
+])
+AUTO_REPLY = os.environ.get("AUTO_REPLY", "").strip() or DEFAULT_AUTO_REPLY
+
 
 def format_date_ja(value: str) -> str:
     """'2026-08-05' → '8/5(火)'。変換できない場合はそのまま返す。"""
@@ -1175,7 +1187,8 @@ def handle_postback(event):
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    """テキストで返信してきた人にはボタンでの回答をお願いする案内を返す"""
+    """テキストが届いたら、日程調整専用である旨と連絡先を案内する。
+    Reply APIなので何通返しても無料通数は消費しない。"""
     user_id = event.source.user_id
 
     with ApiClient(configuration) as api_client:
@@ -1186,11 +1199,7 @@ def handle_message(event):
         line_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[
-                    TextMessage(
-                        text="日程候補メッセージのボタンをタップしてご回答ください（複数タップ可）。"
-                    )
-                ],
+                messages=[TextMessage(text=AUTO_REPLY)],
             )
         )
 
