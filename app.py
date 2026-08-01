@@ -140,7 +140,7 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
 </div>
 
 <div id="commentBox" style="display:none">
-  <h2>（任意）連絡事項やリクエストあれば</h2>
+  <h2 id="commentTitle">（任意）連絡事項やリクエストあれば</h2>
   <textarea id="comment" rows="3" maxlength="500"></textarea>
 </div>
 
@@ -188,6 +188,9 @@ async function main() {
       <input type="checkbox" name="candidate" value="${i + 1}">${c}
     </label>
   `).join("");
+  if (data.comment_label) {
+    document.getElementById("commentTitle").textContent = data.comment_label;
+  }
   document.getElementById("commentBox").style.display = "block";
   document.getElementById("status").textContent = "";
 }
@@ -251,6 +254,7 @@ def liff_candidates():
         "candidates": candidates,
         "locations": LOCATIONS,
         "deadline": format_date_ja(load_json("deadline", default="")),
+        "comment_label": load_json("comment_label", default="") or "（任意）連絡事項やリクエストあれば",
     }
 
 
@@ -366,7 +370,20 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   .wk .cell.past { background: #f6f6f6; border-color: #f0f0f0; cursor: default; }
   .wk .cell.past:hover { border-color: #f0f0f0; }
 
-  textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; }
+  textarea, input[type=text] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; }
+  .dlcal { background: #f8f9fa; border: 1px solid #e6e8ea; border-radius: 10px; padding: 12px 14px; }
+  .calhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; font-size: 14px; }
+  .calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .calgrid .wd { text-align: center; font-size: 12px; color: #888; padding: 3px 0; }
+  .calgrid .wd.sat { color: #3b7dd8; }
+  .calgrid .wd.sun { color: #d84b4b; }
+  .dlday { padding: 8px 0; text-align: center; font-size: 14px; border: 1px solid #e4e4e4; border-radius: 8px; background: #fff; cursor: pointer; user-select: none; }
+  .dlday:hover { border-color: #06C755; }
+  .dlday.sel { background: #06C755; color: #fff; border-color: #06C755; font-weight: 600; }
+  .dlday.today { border-color: #06C755; border-width: 2px; }
+  .dlday.past { color: #c8c8c8; background: #fafafa; cursor: default; }
+  .dlday.past:hover { border-color: #e4e4e4; }
+  .dlday.blank { border: none; background: none; cursor: default; }
   .bubble { max-width: 300px; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 14px; }
   .bubbletext { font-size: 13px; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
   .bubblesub { font-size: 11px; color: #999; margin-top: 4px; }
@@ -409,10 +426,26 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
     <span class="muted">候補ボタンの上に表示されます</span>
     <button class="mini" onclick="resetMessage()">初期文に戻す</button>
   </div>
-  <div class="row" style="margin-top:14px">
-    <span class="muted">回答期限</span>
-    <input type="date" id="deadline" onchange="onMessageInput()">
-    <button class="mini" onclick="clearDeadline()">なしにする</button>
+
+  <div class="lbl" style="margin-top:18px">回答フォームの記入欄の見出し</div>
+  <input type="text" id="commentLabel" oninput="onMessageInput()" placeholder="（任意）連絡事項やリクエストあれば">
+  <div class="row" style="margin-top:6px">
+    <button class="mini" onclick="resetCommentLabel()">初期文に戻す</button>
+  </div>
+
+  <div class="lbl" style="margin-top:18px">回答期限</div>
+  <div class="dlcal">
+    <div class="calhead">
+      <button class="mini" onclick="moveDlMonth(-1)">‹ 前の月</button>
+      <span id="dlTitle"></span>
+      <button class="mini" onclick="moveDlMonth(1)">次の月 ›</button>
+    </div>
+    <div class="calgrid" id="dlWeekdays"></div>
+    <div class="calgrid" id="dlDays"></div>
+    <div class="row" style="margin-top:10px">
+      <span class="muted" id="dlChosen"></span>
+      <button class="mini" onclick="clearDeadline()">なしにする</button>
+    </div>
   </div>
 </div>
 
@@ -517,32 +550,70 @@ function applyCell(el) {
 const DEFAULT_MESSAGE = '日程調整のお願いです。ボタンをタップして、都合の良い日程をすべて選んでください。';
 const msgBox = document.getElementById('message');
 
+const DEFAULT_COMMENT_LABEL = '（任意）連絡事項やリクエストあれば';
+let deadlineValue = '';
+let dlView = new Date();
+
 function currentMessage() { return msgBox.value.trim() || DEFAULT_MESSAGE; }
+function currentCommentLabel() {
+  return document.getElementById('commentLabel').value.trim() || DEFAULT_COMMENT_LABEL;
+}
 function deadlineJa() {
-  const v = document.getElementById('deadline').value;
-  if (!v) return '';
-  const dt = new Date(v + 'T00:00:00');
+  if (!deadlineValue) return '';
+  const dt = new Date(deadlineValue + 'T00:00:00');
   return (dt.getMonth() + 1) + '/' + dt.getDate() + '(' + WD[dt.getDay()] + ')';
 }
+function renderDeadlineCal() {
+  const y = dlView.getFullYear(), mo = dlView.getMonth();
+  document.getElementById('dlTitle').textContent = y + '年' + (mo + 1) + '月';
+  document.getElementById('dlWeekdays').innerHTML = WD.map((w, i) =>
+    `<div class="wd ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</div>`).join('');
+
+  const first = new Date(y, mo, 1).getDay();
+  const last = new Date(y, mo + 1, 0).getDate();
+  const todayStr = ymd(new Date());
+  let cells = Array.from({ length: first }, () => '<div class="dlday blank"></div>');
+  for (let d = 1; d <= last; d++) {
+    const s = ymd(new Date(y, mo, d));
+    const cls = ['dlday'];
+    if (s === deadlineValue) cls.push('sel');
+    if (s === todayStr) cls.push('today');
+    if (s < todayStr) cls.push('past');
+    const click = s < todayStr ? '' : ` onclick="pickDeadline('${s}')"`;
+    cells.push(`<div class="${cls.join(' ')}"${click}>${d}</div>`);
+  }
+  document.getElementById('dlDays').innerHTML = cells.join('');
+  const ja = deadlineJa();
+  document.getElementById('dlChosen').textContent = ja ? '選択中: ' + ja : '未設定';
+}
+function moveDlMonth(diff) { dlView.setMonth(dlView.getMonth() + diff); renderDeadlineCal(); }
+function pickDeadline(s) { deadlineValue = (deadlineValue === s) ? '' : s; onMessageInput(); }
+function clearDeadline() { deadlineValue = ''; onMessageInput(); }
+
 function onMessageInput() {
   document.getElementById('msgPreview').textContent = currentMessage();
   const d = deadlineJa();
   document.getElementById('deadlinePreview').textContent = d ? '本文の最後に「回答期限: ' + d + '」が入ります' : '';
+  renderDeadlineCal();
   try {
     localStorage.setItem('scheduleBotMessage', msgBox.value);
-    localStorage.setItem('scheduleBotDeadline', document.getElementById('deadline').value);
+    localStorage.setItem('scheduleBotDeadline', deadlineValue);
+    localStorage.setItem('scheduleBotCommentLabel', document.getElementById('commentLabel').value);
   } catch (e) {}
 }
-function clearDeadline() { document.getElementById('deadline').value = ''; onMessageInput(); }
 function resetMessage() { msgBox.value = DEFAULT_MESSAGE; onMessageInput(); }
+function resetCommentLabel() { document.getElementById('commentLabel').value = DEFAULT_COMMENT_LABEL; onMessageInput(); }
 function initMessage() {
-  let saved = '', savedDl = '';
+  let saved = '', savedDl = '', savedLabel = '';
   try {
     saved = localStorage.getItem('scheduleBotMessage') || '';
     savedDl = localStorage.getItem('scheduleBotDeadline') || '';
+    savedLabel = localStorage.getItem('scheduleBotCommentLabel') || '';
   } catch (e) {}
   msgBox.value = saved || DEFAULT_MESSAGE;
-  if (savedDl) document.getElementById('deadline').value = savedDl;
+  document.getElementById('commentLabel').value = savedLabel || DEFAULT_COMMENT_LABEL;
+  deadlineValue = savedDl || '';
+  if (deadlineValue) dlView = new Date(deadlineValue + 'T00:00:00');
   msgBox.addEventListener('input', onMessageInput);
   onMessageInput();
 }
@@ -650,7 +721,8 @@ async function send() {
       + '&candidates=' + encodeURIComponent(list.join('|'))
       + '&to=' + to.join(',')
       + '&message=' + encodeURIComponent(currentMessage())
-      + '&deadline=' + encodeURIComponent(document.getElementById('deadline').value);
+      + '&deadline=' + encodeURIComponent(deadlineValue)
+      + '&comment_label=' + encodeURIComponent(currentCommentLabel());
     const res = await fetch(url);
     const text = await res.text();
     box.className = res.ok ? 'ok' : 'err';
@@ -766,6 +838,10 @@ def admin_send():
     # 締め切り日（YYYY-MM-DD）。フォーム上部とLINE本文の末尾に表示する。
     deadline_raw = request.args.get("deadline", "").strip()
     save_json("deadline", deadline_raw)
+
+    # 回答フォームの記入欄の見出し
+    comment_label = request.args.get("comment_label", "").strip()
+    save_json("comment_label", comment_label)
 
     result = send_schedule(candidates, member_indices, message, format_date_ja(deadline_raw))
     return f"<pre>{result}</pre>"

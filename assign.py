@@ -4,22 +4,23 @@
 回答（誰がどの枠に○を付けたか）をもとに、次の条件で枠を割り当てる。
 
 - 1つの時間枠には1組だけ
-- 個人レッスンは1人＝1組。グループレッスンはグループ全体で1組
-- グループは「参加できる人数が最も多い枠」に入れる（全員でなくてもよい）
-- 人ごとに必要なコマ数を満たす
+- 個人レッスンは1枠（1時間）、グループレッスンは連続した2枠（2時間）
+- グループは「参加できる人数が最も多い時間帯」に入れる（全員でなくてもよい）
 - 使う日数をできるだけ少なくし、同じ日の中では連続した時間になるようにする
 - 教室が複数ある場合、同じ日に別の教室へ移る際は1時間以上空ける（移動時間）
 
-割り当てはKuhnのアルゴリズム（二部マッチング）で行う。
-必要コマ数が複数の場合は、その数だけ「枠を1つ欲しい組」に分身させて扱う。
+日ごとに「どの時間帯をどの教室に使うか」を決めながら、
+制約の厳しい組（＝入れられる場所が少ない組）から順に早い時間へ詰めていく。
 """
 
 from collections import Counter
-from itertools import combinations
 
 # 別の教室へ移るときに空ける時間（時間単位）。
-# 2なら「10時の枠の次は12時から」という意味になり、間に1時間の空きができる。
+# 2なら「10時に終わった次は12時から」という意味になり、間に1時間の空きができる。
 TRAVEL_GAP = 2
+
+# グループレッスンが使う枠数（1枠=1時間）
+GROUP_SLOTS = 2
 
 
 def split_slot(label: str):
@@ -50,7 +51,7 @@ def build_availability(candidates: list[str], votes: list[dict]):
 
 
 def build_entities(avail, names, quotas, locations, groups):
-    """個人とグループをまとめて「1つの枠を取り合う組」として整理する。
+    """個人とグループをまとめて「枠を取り合う組」として整理する。
 
     groups: {user_id: グループ名}。未設定・空文字なら個人レッスン扱い。
     """
@@ -69,13 +70,16 @@ def build_entities(avail, names, quotas, locations, groups):
                     "name": group_name,
                     "is_group": True,
                     "members": [],
+                    "member_ids": [],
                     "avail": set(),
                     "attend": Counter(),
                     "locs": [],
-                    "quota": 1,  # グループは1コマ
+                    "length": GROUP_SLOTS,  # 連続2枠
+                    "bookings": 1,
                 },
             )
             e["members"].append(names.get(user_id, user_id))
+            e["member_ids"].append(user_id)
             e["avail"] |= slots
             for s in slots:
                 e["attend"][s] += 1
@@ -89,10 +93,12 @@ def build_entities(avail, names, quotas, locations, groups):
                 "name": names.get(user_id, user_id),
                 "is_group": False,
                 "members": [names.get(user_id, user_id)],
+                "member_ids": [user_id],
                 "avail": set(slots),
                 "attend": Counter({s: 1 for s in slots}),
                 "locs": [l for l in [(locations or {}).get(user_id, "")] if l],
-                "quota": quota,
+                "length": 1,
+                "bookings": quota,
             }
 
     # グループの教室はメンバーの回答の多数決で決める
@@ -102,59 +108,65 @@ def build_entities(avail, names, quotas, locations, groups):
     return entities
 
 
-def _match(units, entities, slot_ok):
-    """units（枠を1つ欲しい組の一覧）を割り当てる。
-    slot_ok(unit番号, 枠番号) がTrueの枠だけ使える。
-    個人は早い枠から、グループは参加人数が多い枠から優先して埋める。
-    戻り値: (枠番号 → unitの添字, 割り当てできた数)"""
-    owner: dict[int, int] = {}
+def _starts_for(entity, day_slots_by_hour, free_hours, allowed_hours):
+    """その組をこの日に入れられる開始時刻の一覧を返す。
+    グループは連続した枠が必要なので、続きの時刻も空いているか確認する。"""
+    starts = []
+    for h in sorted(allowed_hours):
+        block = [h + k for k in range(entity["length"])]
+        if not all(
+            b in free_hours and b in allowed_hours and day_slots_by_hour.get(b) is not None
+            for b in block
+        ):
+            continue
+        if not all(day_slots_by_hour[b] in entity["avail"] for b in block):
+            continue
+        starts.append(h)
+    return starts
 
-    def preference(eid):
+
+def _fill_day(pending, entities, day_slots_by_hour, hours_a, hours_b, loc_a):
+    """1日分を埋める。制約の厳しい組から順に、早い時間へ詰めていく。
+    戻り値: {組ID: [枠番号...]}"""
+    free = set(day_slots_by_hour.keys())
+    placed: dict[str, list] = {}
+    remaining = list(pending)
+
+    while True:
+        options = []
+        for idx, eid in enumerate(remaining):
+            e = entities[eid]
+            allowed = hours_a if (e["location"] or loc_a) == loc_a else hours_b
+            starts = _starts_for(e, day_slots_by_hour, free, allowed)
+            if starts:
+                options.append((len(starts), idx, eid, starts))
+        if not options:
+            break
+
+        # 入れられる場所が少ない組を優先。同数ならグループを先に。
+        options.sort(key=lambda x: (x[0], not entities[x[2]]["is_group"], x[3][0]))
+        _, idx, eid, starts = options[0]
         e = entities[eid]
+
         if e["is_group"]:
-            return sorted(e["avail"], key=lambda s: (-e["attend"][s], s))
-        return sorted(e["avail"])
+            # 参加人数が最も多くなる開始時刻を選ぶ
+            def attendance(h):
+                return sum(e["attend"][day_slots_by_hour[h + k]] for k in range(e["length"]))
+            start = sorted(starts, key=lambda h: (-attendance(h), h))[0]
+        else:
+            start = starts[0]
 
-    prefs = [preference(u) for u in units]
+        block = [day_slots_by_hour[start + k] for k in range(e["length"])]
+        placed.setdefault(eid, []).extend(block)
+        for k in range(e["length"]):
+            free.discard(start + k)
+        remaining.pop(idx)
 
-    def try_assign(ui, seen):
-        for s in prefs[ui]:
-            if s in seen or not slot_ok(ui, s):
-                continue
-            seen.add(s)
-            if s not in owner or try_assign(owner[s], seen):
-                owner[s] = ui
-                return True
-        return False
-
-    matched = 0
-    # グループを先に処理して、参加人数の多い枠を確保しやすくする
-    order = sorted(range(len(units)), key=lambda i: not entities[units[i]]["is_group"])
-    for ui in order:
-        if try_assign(ui, set()):
-            matched += 1
-    return owner, matched
-
-
-def _assign_single_location(units, entities, candidates, day_of, days):
-    """教室が1つ以下の場合。使う日数が最小になる組み合わせを探す。"""
-    all_slots = set(range(len(candidates)))
-    total = len(units)
-
-    if len(days) <= 10:
-        for k in range(1, len(days) + 1):
-            for combo in combinations(days, k):
-                allowed = {i for i in all_slots if day_of[i] in combo}
-                owner, matched = _match(units, entities, lambda ui, s: s in allowed)
-                if matched == total:
-                    return owner
-    owner, _ = _match(units, entities, lambda ui, s: True)
-    return owner
+    return placed
 
 
 def _day_plans(hours: list[int]):
     """その日の時間帯を2つの教室にどう割り振るかの候補を列挙する。
-    (教室Aが使える時刻の集合, 教室Bが使える時刻の集合) を返す。
     別教室の間はTRAVEL_GAP時間以上あける。"""
     plans = [(set(hours), set()), (set(), set(hours))]
     if not hours:
@@ -168,52 +180,6 @@ def _day_plans(hours: list[int]):
     return plans
 
 
-def _assign_two_locations(units, entities, candidates, day_of, days, loc_names):
-    """教室が2つ以上の場合。日ごとに「どの時間帯をどの教室に使うか」を決めながら、
-    早い日・早い時間から詰めていく。"""
-    loc_a = loc_names[0]
-    slots_of_day: dict[str, list] = {}
-    for i in range(len(candidates)):
-        slots_of_day.setdefault(day_of[i], []).append(i)
-
-    owner: dict[int, int] = {}
-    remaining = list(range(len(units)))
-
-    for day in days:
-        if not remaining:
-            break
-        day_slots = set(slots_of_day[day])
-        hours = sorted({slot_hour(candidates[i]) for i in day_slots})
-
-        best = None
-        for hours_a, hours_b in _day_plans(hours):
-            def ok(ri, s, ha=hours_a, hb=hours_b):
-                if s not in day_slots:
-                    return False
-                h = slot_hour(candidates[s])
-                loc = entities[units[remaining[ri]]]["location"] or loc_a
-                return h in (ha if loc == loc_a else hb)
-
-            sub_units = [units[r] for r in remaining]
-            sub_owner, matched = _match(sub_units, entities, ok)
-            if not matched:
-                continue
-            used = sorted(slot_hour(candidates[s]) for s in sub_owner)
-            attend = sum(entities[sub_units[ri]]["attend"][s] for s, ri in sub_owner.items())
-            score = (-matched, -attend, used[-1] - used[0], used[0])
-            if best is None or score < best[0]:
-                best = (score, sub_owner)
-
-        if best is None:
-            continue
-        for s, ri in best[1].items():
-            owner[s] = remaining[ri]
-        taken = set(best[1].values())
-        remaining = [r for i, r in enumerate(remaining) if i not in taken]
-
-    return owner
-
-
 def auto_assign(
     candidates: list[str],
     votes: list[dict],
@@ -223,7 +189,7 @@ def auto_assign(
 ) -> dict:
     """割り当てを実行して結果を返す。
 
-    quotas: {user_id: コマ数}。未指定の人は1コマ。
+    quotas: {user_id: コマ数}。個人のみ有効（グループは常に連続2枠）。
     locations: {user_id: 教室名}。2種類以上あるときは教室間に移動時間を確保する。
     groups: {user_id: グループ名}。同じ名前の人は1組として扱う。
     """
@@ -233,10 +199,11 @@ def auto_assign(
     if not entities:
         return {"ok": False, "error": "割り当て対象がいません。先に回答を集めてください。"}
 
-    units = []
+    # 予約1件を1エントリとして展開（個人がコマ数2なら2件）
+    pending = []
     for eid, e in entities.items():
-        units.extend([eid] * e["quota"])
-    total_needed = len(units)
+        pending.extend([eid] * e["bookings"])
+    total_needed = len(pending)
 
     day_of = {i: split_slot(c)[0] for i, c in enumerate(candidates)}
     days = []
@@ -248,46 +215,91 @@ def auto_assign(
     for e in entities.values():
         if e["location"] and e["location"] not in loc_names:
             loc_names.append(e["location"])
+    loc_a = loc_names[0] if loc_names else ""
+    multi_loc = len(loc_names) >= 2
 
-    if len(loc_names) >= 2:
-        owner = _assign_two_locations(units, entities, candidates, day_of, days, loc_names)
-    else:
-        owner = _assign_single_location(units, entities, candidates, day_of, days)
+    slots_by_day: dict[str, dict] = {}
+    for i in range(len(candidates)):
+        slots_by_day.setdefault(day_of[i], {})[slot_hour(candidates[i])] = i
 
-    assigned_count: dict[str, int] = {}
+    assignments: dict[int, str] = {}  # 枠番号 → 組ID
+
+    for day in days:
+        if not pending:
+            break
+        day_slots_by_hour = slots_by_day[day]
+        hours = sorted(day_slots_by_hour.keys())
+        plans = _day_plans(hours) if multi_loc else [(set(hours), set(hours))]
+
+        best = None
+        for hours_a, hours_b in plans:
+            placed = _fill_day(pending, entities, day_slots_by_hour, hours_a, hours_b, loc_a)
+            count = sum(len(v) // entities[k]["length"] for k, v in placed.items())
+            if not count:
+                continue
+            used = sorted(slot_hour(candidates[s]) for v in placed.values() for s in v)
+            attend = sum(entities[k]["attend"][s] for k, v in placed.items() for s in v)
+            score = (-count, -attend, used[-1] - used[0], used[0])
+            if best is None or score < best[0]:
+                best = (score, placed)
+
+        if best is None:
+            continue
+
+        for eid, slots in best[1].items():
+            length = entities[eid]["length"]
+            for n in range(len(slots) // length):
+                for s in slots[n * length:(n + 1) * length]:
+                    assignments[s] = eid
+                pending.remove(eid)
+
+    # 結果を整形（同じ組の連続枠は1件にまとめる）
     schedule = []
-    for slot_index in sorted(owner.keys()):
-        eid = units[owner[slot_index]]
+    done = set()
+    for slot_index in sorted(assignments.keys()):
+        if slot_index in done:
+            continue
+        eid = assignments[slot_index]
         e = entities[eid]
-        assigned_count[eid] = assigned_count.get(eid, 0) + 1
-        day, time = split_slot(candidates[slot_index])
+        block = [slot_index]
+        for k in range(1, e["length"]):
+            nxt = slot_index + k
+            if assignments.get(nxt) == eid:
+                block.append(nxt)
+        done.update(block)
+
+        day, start_time = split_slot(candidates[block[0]])
+        end_hour = slot_hour(candidates[block[-1]]) + 1
+        attend = min(e["attend"][s] for s in block) if e["is_group"] else 1
 
         absent = []
         if e["is_group"]:
-            # この枠に○を付けていないメンバーを洗い出す
-            for user_id, slots in avail.items():
-                if (groups or {}).get(user_id, "").strip() == eid and slot_index not in slots:
+            for user_id in e["member_ids"]:
+                if not all(s in avail.get(user_id, set()) for s in block):
                     absent.append(names.get(user_id, user_id))
 
         schedule.append(
             {
                 "day": day,
-                "time": time,
-                "label": candidates[slot_index],
+                "time": start_time,
+                "end": f"{end_hour}:00",
+                "label": candidates[block[0]],
                 "name": e["name"],
                 "location": e["location"],
                 "is_group": e["is_group"],
-                "attend": e["attend"][slot_index],
+                "attend": attend,
                 "total": len(e["members"]),
                 "absent": absent,
+                "slots": block,
             }
         )
 
+    assigned_count = Counter(assignments[s] for s in assignments)
     shortfall = []
     for eid, e in entities.items():
-        got = assigned_count.get(eid, 0)
-        if got < e["quota"]:
-            shortfall.append({"name": e["name"], "need": e["quota"], "got": got})
+        got = assigned_count.get(eid, 0) // e["length"]
+        if got < e["bookings"]:
+            shortfall.append({"name": e["name"], "need": e["bookings"], "got": got})
 
     used_days = []
     for s in schedule:
@@ -305,25 +317,36 @@ def auto_assign(
     }
 
 
-def check_travel_gap(schedule: list[dict]) -> list[str]:
-    """同じ日に別教室の枠が近すぎないかを検算する。問題があれば説明を返す。"""
+def check_conflicts(result: dict) -> list[str]:
+    """枠の重複・教室間の間隔不足がないか検算する。"""
     problems = []
+    seen = {}
+    for s in result["schedule"]:
+        for slot in s["slots"]:
+            if slot in seen:
+                problems.append(f"枠が重複: {s['label']}（{seen[slot]} と {s['name']}）")
+            seen[slot] = s["name"]
+
     by_day: dict[str, list] = {}
-    for s in schedule:
+    for s in result["schedule"]:
         by_day.setdefault(s["day"], []).append(s)
 
     for day, items in by_day.items():
-        items = sorted(items, key=lambda x: x["time"])
         for i in range(len(items)):
             for j in range(i + 1, len(items)):
                 a, b = items[i], items[j]
                 if not a["location"] or not b["location"] or a["location"] == b["location"]:
                     continue
                 try:
-                    gap = int(b["time"].split(":")[0]) - int(a["time"].split(":")[0])
+                    a_start = int(a["time"].split(":")[0])
+                    a_end = int(a["end"].split(":")[0])
+                    b_start = int(b["time"].split(":")[0])
+                    b_end = int(b["end"].split(":")[0])
                 except (ValueError, IndexError):
                     continue
-                if gap < TRAVEL_GAP:
+                # 先に終わる方から次の教室の開始までの間隔を見る
+                gap = b_start - a_end if b_start >= a_end else a_start - b_end
+                if gap < TRAVEL_GAP - 1:
                     problems.append(
                         f"{day} {a['time']}({a['location']}) と {b['time']}({b['location']}) の間隔が足りません"
                     )
@@ -350,17 +373,19 @@ def format_result(result: dict) -> str:
             lines.append(f"■ {current_day}")
         loc = f"　[{s['location']}]" if s["location"] else ""
         if s["is_group"]:
-            lines.append(f"  {s['time']}  {s['name']}（{s['attend']}/{s['total']}人）{loc}")
+            lines.append(
+                f"  {s['time']}-{s['end']}  {s['name']}（{s['attend']}/{s['total']}人）{loc}"
+            )
             if s["absent"]:
-                lines.append(f"          参加不可: {', '.join(s['absent'])}")
+                lines.append(f"              参加不可: {', '.join(s['absent'])}")
         else:
-            lines.append(f"  {s['time']}  {s['name']}{loc}")
+            lines.append(f"  {s['time']}-{s['end']}  {s['name']}{loc}")
 
     if result["shortfall"]:
         lines.append("")
         lines.append("=== 割り当てできなかった分 ===")
         lines.append("")
         for s in result["shortfall"]:
-            lines.append(f"  {s['name']}　{s['got']}/{s['need']}コマ（希望した枠が埋まりました）")
+            lines.append(f"  {s['name']}　{s['got']}/{s['need']}件（希望した枠が埋まりました）")
 
     return "\n".join(lines)
