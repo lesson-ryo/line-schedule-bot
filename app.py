@@ -1018,6 +1018,13 @@ loadMembers();
 """
 
 
+@app.route("/healthz", methods=["GET", "HEAD"])
+def healthz():
+    """スリープ防止のping用。外部から定期的に叩いてサーバーを起こしたままにする。
+    処理は文字列を返すだけなので、Upstashへのアクセスもログ出力も発生しない。"""
+    return "ok", 200
+
+
 @app.route("/admin/panel", methods=["GET"])
 def admin_panel():
     """管理者用の入力フォーム。日付と時間帯を選ぶだけで候補リストを組み立てて送信できる。"""
