@@ -714,7 +714,8 @@ def admin_assign():
 
     candidates = load_json("candidates", default=[])
     votes = load_json("votes")
-    result = assign_mod.auto_assign(candidates, votes, quotas)
+    locations = {l["user_id"]: l["location"] for l in load_json("locations")}
+    result = assign_mod.auto_assign(candidates, votes, quotas, locations)
 
     panel = f"/admin/panel?token={ADMIN_TOKEN}"
     body = assign_mod.format_result(result)
