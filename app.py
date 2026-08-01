@@ -534,9 +534,19 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
     各自に自分の枠だけが届きます。確認画面が出てから送信されます。
   </div>
 
-  <div class="links" style="margin-top:16px;border-top:1px solid #eee;padding-top:14px">
-    <a href="#" onclick="go('remind');return false;">未回答の人にリマインドを送る</a>
-    <a href="#" onclick="go('followup');return false;">枠が取れなかった人に空き時間を送る</a>
+  <div style="margin-top:18px;border-top:1px solid #eee;padding-top:14px">
+    <div class="lbl">空き枠のお知らせ（枠が決まらなかった人向け）</div>
+    <div class="muted" style="margin-bottom:6px">枠が取れなかった人</div>
+    <textarea id="missedMessage" rows="3" oninput="saveOpenSlotMessages()"></textarea>
+    <div class="muted" style="margin:10px 0 6px">回答がなかった人</div>
+    <textarea id="norespMessage" rows="3" oninput="saveOpenSlotMessages()"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="sub" onclick="goOpenSlots()">空き枠のお知らせを確認する</button>
+      <button class="mini" onclick="resetOpenSlotMessages()">初期文に戻す</button>
+    </div>
+    <div class="muted" style="margin-top:8px">
+      確定済みの枠の前後に残っている空き時間だけを案内します。
+    </div>
   </div>
 </div>
 
@@ -804,6 +814,36 @@ function initNotify() {
   try { saved = localStorage.getItem('scheduleBotNotify') || ''; } catch (e) {}
   notifyBox().value = saved || DEFAULT_NOTIFY;
 }
+const DEFAULT_MISSED = '日程が確定しましたが、ご希望いただいた時間は他の方と重なってしまいました。\n予定が合いませんでしたが、一応現状の空き状況をお知らせします。\nご都合の良い時間があれば、このトークで返信いただけますか。';
+const DEFAULT_NORESP = '日程が確定しました。ご回答をいただけなかったため、現在空いている時間をお知らせします。\nご希望があれば、このトークで返信いただけますか。';
+function saveOpenSlotMessages() {
+  try {
+    localStorage.setItem('scheduleBotMissed', document.getElementById('missedMessage').value);
+    localStorage.setItem('scheduleBotNoresp', document.getElementById('norespMessage').value);
+  } catch (e) {}
+}
+function resetOpenSlotMessages() {
+  document.getElementById('missedMessage').value = DEFAULT_MISSED;
+  document.getElementById('norespMessage').value = DEFAULT_NORESP;
+  saveOpenSlotMessages();
+}
+function initOpenSlots() {
+  let a = '', b = '';
+  try {
+    a = localStorage.getItem('scheduleBotMissed') || '';
+    b = localStorage.getItem('scheduleBotNoresp') || '';
+  } catch (e) {}
+  document.getElementById('missedMessage').value = a || DEFAULT_MISSED;
+  document.getElementById('norespMessage').value = b || DEFAULT_NORESP;
+}
+function goOpenSlots() {
+  const missed = document.getElementById('missedMessage').value.trim() || DEFAULT_MISSED;
+  const noresp = document.getElementById('norespMessage').value.trim() || DEFAULT_NORESP;
+  location.href = '/admin/openslots?token=' + encodeURIComponent(TOKEN)
+    + '&missed=' + encodeURIComponent(missed)
+    + '&noresp=' + encodeURIComponent(noresp);
+}
+
 function goNotify() {
   const msg = notifyBox().value.trim() || DEFAULT_NOTIFY;
   location.href = '/admin/notify?token=' + encodeURIComponent(TOKEN)
@@ -821,6 +861,7 @@ function runAssign() {
 
 initMessage();
 initNotify();
+initOpenSlots();
 renderGrid();
 renderPreview();
 loadMembers();
@@ -902,66 +943,19 @@ def _confirm_page(body: str, send_url: str, count: int) -> str:
     )
 
 
-@app.route("/admin/remind", methods=["GET"])
-def admin_remind():
-    """まだ回答していない人にリマインドを送る。
-    &auto=1 を付けると「回答期限の前日」だけ送る（自動実行用・1日1回まで）。"""
-    check_admin_token()
-    from schedule_tools import build_remind_text, send_text_to, DEFAULT_REMIND_MESSAGE
-
-    members = load_json("members")
-    votes = load_json("votes")
-    answered = {v["user_id"] for v in votes}
-    targets = [m for m in members if m["user_id"] not in answered]
-
-    deadline_raw = load_json("deadline", default="")
-    message = request.args.get("message", "") or load_json("remind_message", default="")
-    save_json("remind_message", message)
-    text = build_remind_text(message, format_date_ja(deadline_raw))
-
-    back = f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
-
-    if request.args.get("auto") == "1":
-        # 自動実行: 期限の前日だけ、1日1回だけ送る
-        today = datetime.now(JST).date()
-        if not deadline_raw:
-            return "<pre>回答期限が未設定のため送信しませんでした。</pre>", 200
-        try:
-            due = datetime.strptime(deadline_raw, "%Y-%m-%d").date()
-        except ValueError:
-            return "<pre>回答期限を読み取れませんでした。</pre>", 200
-        if (due - today).days != 1:
-            return f"<pre>本日({today})は期限前日ではないため送信しませんでした。</pre>", 200
-        if load_json("last_remind", default="") == str(today):
-            return "<pre>本日は送信済みのため、重複送信しませんでした。</pre>", 200
-        if not targets:
-            return "<pre>未回答の方はいません。</pre>", 200
-        save_json("last_remind", str(today))
-        result = send_text_to([m["user_id"] for m in targets], text)
-        return f"<pre>{result}</pre>", 200
-
-    if not targets:
-        return f"<pre>未回答の方はいません。</pre>{back}"
-
-    if request.args.get("send") == "1":
-        result = send_text_to([m["user_id"] for m in targets], text)
-        return f"<pre>{result}</pre>{back}"
-
-    names = "、".join(m["display_name"] for m in targets)
-    body = f"未回答: {len(targets)}人（{names}）\n\n--- 送信内容 ---\n{text}"
-    send_url = (
-        f"/admin/remind?token={ADMIN_TOKEN}&send=1"
-        f"&message={quote(message or DEFAULT_REMIND_MESSAGE)}"
-    )
-    return _confirm_page(body, send_url, len(targets))
-
-
-@app.route("/admin/followup", methods=["GET"])
-def admin_followup():
-    """枠が取れなかった人に、確定済みの枠の前後に残っている空き時間を案内する。"""
+@app.route("/admin/openslots", methods=["GET"])
+def admin_openslots():
+    """日程確定後、まだ枠が決まっていない人に残りの空き時間を知らせる。
+    対象は「回答がなかった人」と「希望が埋まって枠が取れなかった人」の両方。
+    空き枠は確定済みの枠の前後にあるものだけを案内する。"""
     check_admin_token()
     import assign as assign_mod
-    from schedule_tools import build_followup_text, send_text_to, DEFAULT_FOLLOWUP_MESSAGE
+    from schedule_tools import (
+        build_followup_text,
+        send_text_to,
+        DEFAULT_FOLLOWUP_MESSAGE,
+        DEFAULT_NORESPONSE_MESSAGE,
+    )
 
     schedule = load_json("assignment", default=[])
     back = f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
@@ -975,46 +969,62 @@ def admin_followup():
     groups = load_json("groups", default={})
     locations = {l["user_id"]: l["location"] for l in load_json("locations")}
 
+    msg_missed = request.args.get("missed", "") or load_json("missed_message", default="")
+    msg_none = request.args.get("noresp", "") or load_json("noresp_message", default="")
+    save_json("missed_message", msg_missed)
+    save_json("noresp_message", msg_none)
+
     result = assign_mod.auto_assign(candidates, votes, quotas, locations, groups)
     shortfall_names = {s["name"] for s in result.get("shortfall", [])}
-    if not shortfall_names:
-        return f"<pre>枠が取れなかった方はいません。</pre>{back}"
-
-    entities = assign_mod.build_entities(
-        *assign_mod.build_availability(candidates, votes), quotas, locations, groups
-    )
-    message = request.args.get("message", "") or load_json("followup_message", default="")
-    save_json("followup_message", message)
+    avail, names = assign_mod.build_availability(candidates, votes)
+    entities = assign_mod.build_entities(avail, names, quotas, locations, groups)
 
     items = []
+
+    # 1. 希望が埋まって枠が取れなかった人
     for eid, e in entities.items():
         if e["name"] not in shortfall_names:
             continue
         free = assign_mod.free_slots_next_to_bookings(candidates, schedule, e["location"])
-        items.append(
-            {
-                "name": e["name"],
-                "user_ids": list(e["member_ids"]),
-                "text": build_followup_text(free, message),
-            }
-        )
+        items.append({
+            "kind": "枠が取れなかった",
+            "name": e["name"],
+            "user_ids": list(e["member_ids"]),
+            "text": build_followup_text(free, msg_missed or DEFAULT_FOLLOWUP_MESSAGE),
+        })
+
+    # 2. 回答がなかった人（教室の希望が分からないので空き枠は全て案内する）
+    answered = {v["user_id"] for v in votes}
+    free_all = assign_mod.free_slots_next_to_bookings(candidates, schedule, "")
+    for m in members:
+        if m["user_id"] in answered:
+            continue
+        items.append({
+            "kind": "未回答",
+            "name": m["display_name"],
+            "user_ids": [m["user_id"]],
+            "text": build_followup_text(free_all, msg_none or DEFAULT_NORESPONSE_MESSAGE),
+        })
+
+    if not items:
+        return f"<pre>お知らせする相手がいません（全員に枠が決まっています）。</pre>{back}"
 
     total = sum(len(i["user_ids"]) for i in items)
 
     if request.args.get("send") == "1":
-        sent = []
-        for i in items:
-            sent.append(send_text_to(i["user_ids"], i["text"]))
+        sent = [send_text_to(i["user_ids"], i["text"]) for i in items]
         return f"<pre>{chr(10).join(sent)}</pre>{back}"
 
     preview = [f"{total}通を送信します。内容を確認してください。", ""]
     for i in items:
-        preview.append(f"── {i['name']}（{len(i['user_ids'])}人）")
+        preview.append(f"── {i['name']}［{i['kind']}］（{len(i['user_ids'])}人）")
         preview.append(i["text"])
         preview.append("")
+
     send_url = (
-        f"/admin/followup?token={ADMIN_TOKEN}&send=1"
-        f"&message={quote(message or DEFAULT_FOLLOWUP_MESSAGE)}"
+        f"/admin/openslots?token={ADMIN_TOKEN}&send=1"
+        f"&missed={quote(msg_missed or DEFAULT_FOLLOWUP_MESSAGE)}"
+        f"&noresp={quote(msg_none or DEFAULT_NORESPONSE_MESSAGE)}"
     )
     return _confirm_page(chr(10).join(preview), send_url, total)
 

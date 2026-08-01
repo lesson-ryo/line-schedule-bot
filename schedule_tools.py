@@ -195,10 +195,17 @@ def send_schedule(
 
 
 DEFAULT_NOTIFY_MESSAGE = "レッスン日程が確定しましたのでお知らせします。"
-DEFAULT_REMIND_MESSAGE = "日程調整の回答がまだのようです。お手数ですがご回答をお願いします。"
+# 枠が取れなかった人向け
 DEFAULT_FOLLOWUP_MESSAGE = (
-    "申し訳ありません。ご希望いただいた時間は他の方で埋まってしまいました。\n"
-    "下記の空いている時間から、ご都合の良いものをこのトークで返信いただけますか。"
+    "日程が確定しましたが、ご希望いただいた時間は他の方と重なってしまいました。\n"
+    "予定が合いませんでしたが、一応現状の空き状況をお知らせします。\n"
+    "ご都合の良い時間があれば、このトークで返信いただけますか。"
+)
+
+# 回答がなかった人向け
+DEFAULT_NORESPONSE_MESSAGE = (
+    "日程が確定しました。ご回答をいただけなかったため、現在空いている時間をお知らせします。\n"
+    "ご希望があれば、このトークで返信いただけますか。"
 )
 
 
@@ -227,20 +234,8 @@ def send_text_to(user_ids: list[str], text: str) -> str:
     return "\n".join(lines)
 
 
-def build_remind_text(message: str = "", deadline: str = "") -> str:
-    """未回答者へのリマインド本文"""
-    lines = [(message or DEFAULT_REMIND_MESSAGE).strip()]
-    if deadline:
-        lines.append("")
-        lines.append(f"回答期限: {deadline}")
-    if LIFF_ID:
-        lines.append("")
-        lines.append(f"回答はこちら → https://liff.line.me/{LIFF_ID}")
-    return "\n".join(lines)
-
-
 def build_followup_text(free_slots: list[str], message: str = "") -> str:
-    """枠が取れなかった人への案内本文（残っている空き枠を添える）"""
+    """空き枠のお知らせ本文（残っている空き枠を添える）"""
     lines = [(message or DEFAULT_FOLLOWUP_MESSAGE).strip()]
     if free_slots:
         lines.append("")
