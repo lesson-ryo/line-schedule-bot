@@ -195,6 +195,61 @@ def send_schedule(
 
 
 DEFAULT_NOTIFY_MESSAGE = "レッスン日程が確定しましたのでお知らせします。"
+DEFAULT_REMIND_MESSAGE = "日程調整の回答がまだのようです。お手数ですがご回答をお願いします。"
+DEFAULT_FOLLOWUP_MESSAGE = (
+    "申し訳ありません。ご希望いただいた時間は他の方で埋まってしまいました。\n"
+    "下記の空いている時間から、ご都合の良いものをこのトークで返信いただけますか。"
+)
+
+
+def send_text_to(user_ids: list[str], text: str) -> str:
+    """指定した人にテキストメッセージを送る（Push）"""
+    if not user_ids:
+        return "送信対象がいません。"
+
+    sent, failed = 0, []
+    with ApiClient(configuration) as api_client:
+        line_api = MessagingApi(api_client)
+        for user_id in user_ids:
+            try:
+                line_api.push_message(
+                    PushMessageRequest(to=user_id, messages=[TextMessage(text=text)])
+                )
+                sent += 1
+            except Exception as e:
+                failed.append(f"{user_id}: {e}")
+
+    lines = [f"{sent}通を送信しました。"]
+    if failed:
+        lines.append("")
+        lines.append("送信できなかった分:")
+        lines.extend(f"  {f}" for f in failed)
+    return "\n".join(lines)
+
+
+def build_remind_text(message: str = "", deadline: str = "") -> str:
+    """未回答者へのリマインド本文"""
+    lines = [(message or DEFAULT_REMIND_MESSAGE).strip()]
+    if deadline:
+        lines.append("")
+        lines.append(f"回答期限: {deadline}")
+    if LIFF_ID:
+        lines.append("")
+        lines.append(f"回答はこちら → https://liff.line.me/{LIFF_ID}")
+    return "\n".join(lines)
+
+
+def build_followup_text(free_slots: list[str], message: str = "") -> str:
+    """枠が取れなかった人への案内本文（残っている空き枠を添える）"""
+    lines = [(message or DEFAULT_FOLLOWUP_MESSAGE).strip()]
+    if free_slots:
+        lines.append("")
+        lines.append("空いている時間:")
+        lines.extend(f"  {s}" for s in free_slots)
+    else:
+        lines.append("")
+        lines.append("空いている時間がないため、個別に調整させてください。")
+    return "\n".join(lines)
 
 
 def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:

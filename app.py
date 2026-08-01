@@ -12,8 +12,10 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
+
+JST = timezone(timedelta(hours=9))
 
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
@@ -531,6 +533,11 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div class="muted" style="margin-top:8px">
     各自に自分の枠だけが届きます。確認画面が出てから送信されます。
   </div>
+
+  <div class="links" style="margin-top:16px;border-top:1px solid #eee;padding-top:14px">
+    <a href="#" onclick="go('remind');return false;">未回答の人にリマインドを送る</a>
+    <a href="#" onclick="go('followup');return false;">枠が取れなかった人に空き時間を送る</a>
+  </div>
 </div>
 
 <script>
@@ -882,6 +889,134 @@ def admin_assign():
     notify = f"/admin/notify?token={ADMIN_TOKEN}"
     links = f'<p><a href="{notify}">この内容を各自にLINEで送る</a>　<a href="{panel}">管理画面に戻る</a></p>'
     return f"<pre>{body}</pre>{links}"
+
+
+def _confirm_page(body: str, send_url: str, count: int) -> str:
+    """送信前の確認ページ（この画面ではまだ送らない）"""
+    return (
+        f"<pre>{body}</pre>"
+        f'<p><a href="{send_url}" '
+        f"onclick=\"return confirm('{count}通を送信します。よろしいですか？')\">"
+        f"この内容で送信する</a>　"
+        f'<a href="/admin/panel?token={ADMIN_TOKEN}">やめる</a></p>'
+    )
+
+
+@app.route("/admin/remind", methods=["GET"])
+def admin_remind():
+    """まだ回答していない人にリマインドを送る。
+    &auto=1 を付けると「回答期限の前日」だけ送る（自動実行用・1日1回まで）。"""
+    check_admin_token()
+    from schedule_tools import build_remind_text, send_text_to, DEFAULT_REMIND_MESSAGE
+
+    members = load_json("members")
+    votes = load_json("votes")
+    answered = {v["user_id"] for v in votes}
+    targets = [m for m in members if m["user_id"] not in answered]
+
+    deadline_raw = load_json("deadline", default="")
+    message = request.args.get("message", "") or load_json("remind_message", default="")
+    save_json("remind_message", message)
+    text = build_remind_text(message, format_date_ja(deadline_raw))
+
+    back = f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
+
+    if request.args.get("auto") == "1":
+        # 自動実行: 期限の前日だけ、1日1回だけ送る
+        today = datetime.now(JST).date()
+        if not deadline_raw:
+            return "<pre>回答期限が未設定のため送信しませんでした。</pre>", 200
+        try:
+            due = datetime.strptime(deadline_raw, "%Y-%m-%d").date()
+        except ValueError:
+            return "<pre>回答期限を読み取れませんでした。</pre>", 200
+        if (due - today).days != 1:
+            return f"<pre>本日({today})は期限前日ではないため送信しませんでした。</pre>", 200
+        if load_json("last_remind", default="") == str(today):
+            return "<pre>本日は送信済みのため、重複送信しませんでした。</pre>", 200
+        if not targets:
+            return "<pre>未回答の方はいません。</pre>", 200
+        save_json("last_remind", str(today))
+        result = send_text_to([m["user_id"] for m in targets], text)
+        return f"<pre>{result}</pre>", 200
+
+    if not targets:
+        return f"<pre>未回答の方はいません。</pre>{back}"
+
+    if request.args.get("send") == "1":
+        result = send_text_to([m["user_id"] for m in targets], text)
+        return f"<pre>{result}</pre>{back}"
+
+    names = "、".join(m["display_name"] for m in targets)
+    body = f"未回答: {len(targets)}人（{names}）\n\n--- 送信内容 ---\n{text}"
+    send_url = (
+        f"/admin/remind?token={ADMIN_TOKEN}&send=1"
+        f"&message={quote(message or DEFAULT_REMIND_MESSAGE)}"
+    )
+    return _confirm_page(body, send_url, len(targets))
+
+
+@app.route("/admin/followup", methods=["GET"])
+def admin_followup():
+    """枠が取れなかった人に、確定済みの枠の前後に残っている空き時間を案内する。"""
+    check_admin_token()
+    import assign as assign_mod
+    from schedule_tools import build_followup_text, send_text_to, DEFAULT_FOLLOWUP_MESSAGE
+
+    schedule = load_json("assignment", default=[])
+    back = f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
+    if not schedule:
+        return f"<pre>先に「時間枠を自動で割り当てる」を実行してください。</pre>{back}"
+
+    candidates = load_json("candidates", default=[])
+    votes = load_json("votes")
+    members = load_json("members")
+    quotas = load_json("quotas", default={})
+    groups = load_json("groups", default={})
+    locations = {l["user_id"]: l["location"] for l in load_json("locations")}
+
+    result = assign_mod.auto_assign(candidates, votes, quotas, locations, groups)
+    shortfall_names = {s["name"] for s in result.get("shortfall", [])}
+    if not shortfall_names:
+        return f"<pre>枠が取れなかった方はいません。</pre>{back}"
+
+    entities = assign_mod.build_entities(
+        *assign_mod.build_availability(candidates, votes), quotas, locations, groups
+    )
+    message = request.args.get("message", "") or load_json("followup_message", default="")
+    save_json("followup_message", message)
+
+    items = []
+    for eid, e in entities.items():
+        if e["name"] not in shortfall_names:
+            continue
+        free = assign_mod.free_slots_next_to_bookings(candidates, schedule, e["location"])
+        items.append(
+            {
+                "name": e["name"],
+                "user_ids": list(e["member_ids"]),
+                "text": build_followup_text(free, message),
+            }
+        )
+
+    total = sum(len(i["user_ids"]) for i in items)
+
+    if request.args.get("send") == "1":
+        sent = []
+        for i in items:
+            sent.append(send_text_to(i["user_ids"], i["text"]))
+        return f"<pre>{chr(10).join(sent)}</pre>{back}"
+
+    preview = [f"{total}通を送信します。内容を確認してください。", ""]
+    for i in items:
+        preview.append(f"── {i['name']}（{len(i['user_ids'])}人）")
+        preview.append(i["text"])
+        preview.append("")
+    send_url = (
+        f"/admin/followup?token={ADMIN_TOKEN}&send=1"
+        f"&message={quote(message or DEFAULT_FOLLOWUP_MESSAGE)}"
+    )
+    return _confirm_page(chr(10).join(preview), send_url, total)
 
 
 @app.route("/admin/notify", methods=["GET"])
