@@ -21,6 +21,9 @@ from collections import Counter
 # 別の教室へ移るときに空ける時間（時間単位）
 TRAVEL_GAP = 2
 
+# この教室を選んだ人は、どの教室の時間帯にも入れられる
+ANY_LOCATION = "どちらでもOK"
+
 # 時間の最小単位（1時間 = 2コマ = 30分×2）
 UNITS_PER_HOUR = 2
 
@@ -107,11 +110,34 @@ def build_entities(avail, names, quotas, locations, groups):
                 "bookings": quota,
             }
 
-    # グループの教室はメンバーの回答の多数決で決める
+    # グループの教室はメンバーの回答の多数決で決める。
+    # 「どちらでもOK」しかいない場合はどちらにも入れられる扱いのまま。
     for e in entities.values():
-        e["location"] = Counter(e["locs"]).most_common(1)[0][0] if e["locs"] else ""
+        fixed = [l for l in e["locs"] if l != ANY_LOCATION]
+        if fixed:
+            e["location"] = Counter(fixed).most_common(1)[0][0]
+        elif e["locs"]:
+            e["location"] = ANY_LOCATION
+        else:
+            e["location"] = ""
 
     return entities
+
+
+def _base_location(label: str) -> str:
+    """'吹田教室（どちらでもOK）' → '吹田教室'（移動時間の判定用）"""
+    return label.split("（")[0] if label else ""
+
+
+def _resolve_location(location: str, side: str | None, loc_names: list[str]) -> str:
+    """「どちらでもOK」の人が実際にどの教室の時間帯に入ったかを名前にする"""
+    if location != ANY_LOCATION:
+        return location
+    if side == "a" and len(loc_names) >= 1:
+        return f"{loc_names[0]}（どちらでもOK）"
+    if side == "b" and len(loc_names) >= 2:
+        return f"{loc_names[1]}（どちらでもOK）"
+    return ANY_LOCATION
 
 
 def _covered_hours(start_unit: int, length: int):
@@ -157,7 +183,11 @@ def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
         options = []
         for idx, eid in enumerate(remaining):
             e = entities[eid]
-            allowed = hours_a if (e["location"] or loc_a) == loc_a else hours_b
+            loc = e["location"] or loc_a
+            if loc == ANY_LOCATION:
+                allowed = hours_a | hours_b  # どちらの教室の時間帯でもよい
+            else:
+                allowed = hours_a if loc == loc_a else hours_b
             starts = _starts_for(e, lengths[eid], hour_to_slot, free_units, allowed)
             if starts:
                 options.append((len(starts), idx, eid, starts))
@@ -177,7 +207,13 @@ def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
         else:
             start = starts[0]
 
-        placed.append((eid, start, length))
+        # 「どちらでもOK」の場合、実際にどちらの教室の時間帯に入ったかを記録する
+        side = None
+        if (e["location"] or loc_a) == ANY_LOCATION:
+            hrs = _covered_hours(start, length)
+            side = "a" if all(h in hours_a for h in hrs) else "b"
+
+        placed.append((eid, start, length, side))
         for k in range(length):
             free_units.discard(start + k)
         remaining.pop(idx)
@@ -220,10 +256,10 @@ def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a):
             placed = _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
             if not placed:
                 continue
-            used = [u for _, u, _ in placed]
+            used = [u for _, u, _, _ in placed]
             attend = sum(
                 entities[eid]["attend"][hour_to_slot[h]]
-                for eid, u, ln in placed
+                for eid, u, ln, _ in placed
                 for h in _covered_hours(u, ln)
             )
             score = (-len(placed), -attend, max(used) - min(used), min(used))
@@ -234,7 +270,7 @@ def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a):
             continue
 
         result[day] = best[1]
-        for eid, _, _ in best[1]:
+        for eid, _, _, _ in best[1]:
             pending.remove(eid)
 
     return result, len(pending)
@@ -268,8 +304,9 @@ def auto_assign(
 
     loc_names = []
     for e in entities.values():
-        if e["location"] and e["location"] not in loc_names:
-            loc_names.append(e["location"])
+        loc = e["location"]
+        if loc and loc != ANY_LOCATION and loc not in loc_names:
+            loc_names.append(loc)
     loc_a = loc_names[0] if loc_names else ""
     multi_loc = len(loc_names) >= 2
 
@@ -317,7 +354,7 @@ def auto_assign(
     schedule = []
     assigned_count: Counter = Counter()
     for day in days:
-        for eid, start, length in sorted(placement.get(day, []), key=lambda x: x[1]):
+        for eid, start, length, side in sorted(placement.get(day, []), key=lambda x: x[1]):
             e = entities[eid]
             assigned_count[eid] += 1
             hour_to_slot = slots_by_day[day]
@@ -336,7 +373,7 @@ def auto_assign(
                     "time": unit_to_time(start),
                     "end": unit_to_time(start + length),
                     "name": e["name"],
-                    "location": e["location"],
+                    "location": _resolve_location(e["location"], side, loc_names),
                     "is_group": e["is_group"],
                     "shortened": eid in shortened,
                     "attend": attend,
@@ -390,7 +427,8 @@ def check_conflicts(result: dict) -> list[str]:
                         f"{b['time']}-{b['end']}({b['name']}) が重複しています"
                     )
                     continue
-                if not a["location"] or not b["location"] or a["location"] == b["location"]:
+                la, lb = _base_location(a["location"]), _base_location(b["location"])
+                if not la or not lb or la == lb:
                     continue
                 gap_units = b["start_unit"] - a_end
                 if gap_units < (TRAVEL_GAP - 1) * UNITS_PER_HOUR:

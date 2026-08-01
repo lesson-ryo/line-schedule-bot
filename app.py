@@ -120,7 +120,16 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 16px; }
   h1 { font-size: 18px; }
   label { display: block; padding: 12px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 8px; }
-  input[type=checkbox] { margin-right: 10px; transform: scale(1.3); }
+  input[type=checkbox], input[type=radio] { margin-right: 10px; transform: scale(1.3); }
+  .dayblock { border-top: 1px solid #eee; padding: 12px 0 4px; }
+  .dayname { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip { position: relative; }
+  .chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .chip span { display: inline-block; padding: 9px 15px; border-radius: 20px; border: 1px solid #ccc;
+               font-size: 15px; background: #fff; color: #444; cursor: pointer; }
+  .chip input:checked + span { background: #06C755; border-color: #06C755; color: #fff; font-weight: 600; }
+  .daycount { font-size: 12px; color: #06C755; margin-left: 8px; font-weight: normal; }
   button { width: 100%; padding: 14px; font-size: 16px; background: #06C755; color: #fff; border: none; border-radius: 8px; margin-top: 16px; }
   #status { margin-top: 12px; color: #666; }
   h2 { font-size: 15px; margin: 22px 0 6px; }
@@ -150,6 +159,14 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
 <script>
 const LIFF_ID = "__LIFF_ID__";
 let candidates = [];
+
+function updateDayCounts() {
+  document.querySelectorAll("[data-day-count]").forEach(el => {
+    const day = el.getAttribute("data-day-count");
+    const n = document.querySelectorAll(`input[data-day="${day}"]:checked`).length;
+    el.textContent = n ? `　${n}件選択中` : "";
+  });
+}
 
 async function main() {
   await liff.init({ liffId: LIFF_ID });
@@ -183,11 +200,33 @@ async function main() {
     `).join("");
     document.getElementById("locationBox").style.display = "block";
   }
-  form.innerHTML = candidates.map((c, i) => `
-    <label>
-      <input type="checkbox" name="candidate" value="${i + 1}">${c}
-    </label>
+  // 日付ごとにまとめ、時刻はタップ式のチップで並べる
+  const byDay = [];
+  candidates.forEach((c, i) => {
+    const sp = c.lastIndexOf(" ");
+    const day = sp > 0 ? c.slice(0, sp) : c;
+    const time = sp > 0 ? c.slice(sp + 1) : "";
+    let g = byDay.find(x => x.day === day);
+    if (!g) { g = { day: day, items: [] }; byDay.push(g); }
+    g.items.push({ index: i + 1, time: time });
+  });
+
+  form.innerHTML = byDay.map(g => `
+    <div class="dayblock">
+      <div class="dayname">${g.day}<span class="daycount" data-day-count="${g.day}"></span></div>
+      <div class="chips">
+        ${g.items.map(it => `
+          <label class="chip">
+            <input type="checkbox" name="candidate" value="${it.index}" data-day="${g.day}">
+            <span>${it.time}</span>
+          </label>
+        `).join("")}
+      </div>
+    </div>
   `).join("");
+
+  form.addEventListener("change", updateDayCounts);
+  updateDayCounts();
   if (data.comment_label) {
     document.getElementById("commentTitle").textContent = data.comment_label;
   }
