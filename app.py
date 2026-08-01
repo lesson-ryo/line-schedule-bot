@@ -710,6 +710,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
     <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
     <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
     <a href="#" onclick="if(confirm('回答データを削除します。よろしいですか？'))go('reset');return false;">回答をリセットする</a>
+    <a href="#" onclick="go('keepalive');return false;">起動維持の状態</a>
   </div>
 </div>
 
@@ -1023,6 +1024,43 @@ def healthz():
     """スリープ防止のping用。外部から定期的に叩いてサーバーを起こしたままにする。
     処理は文字列を返すだけなので、Upstashへのアクセスもログ出力も発生しない。"""
     return "ok", 200
+
+
+@app.route("/admin/keepalive", methods=["GET"])
+def admin_keepalive():
+    """起動維持(ping)の状態確認と、期限前に打ち切りたいときの手動停止。
+    ?off=1 を付けると今すぐ止める。"""
+    check_admin_token()
+    import keepalive
+
+    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+
+    if request.args.get("off"):
+        msg = keepalive.disarm() or "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
+        return f'<pre>{msg}</pre><p><a href="{panel}">管理画面に戻る</a></p>'
+
+    s = keepalive.status()
+    if not s.get("configured"):
+        body = "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
+    elif s.get("error"):
+        body = f"状態を取得できませんでした: {s['error']}"
+    else:
+        expires = s.get("expires_at") or 0
+        if expires:
+            e = str(expires)
+            when = f"{e[0:4]}/{e[4:6]}/{e[6:8]} {e[8:10]}:{e[10:12]}"
+        else:
+            when = "設定なし（自動停止しません）"
+        body = "\n".join([
+            f"起動維持: {'ON（サーバーは寝ません）' if s['enabled'] else 'OFF'}",
+            f"自動停止: {when}",
+        ])
+
+    off = f"/admin/keepalive?token={ADMIN_TOKEN}&off=1"
+    return (
+        f"<pre>{body}</pre>"
+        f'<p><a href="{off}">今すぐ止める</a>　<a href="{panel}">管理画面に戻る</a></p>'
+    )
 
 
 @app.route("/admin/panel", methods=["GET"])
@@ -1351,6 +1389,13 @@ def admin_send():
     save_json("comment_label", comment_label)
 
     result = send_schedule(candidates, member_indices, message, format_date_ja(deadline_raw))
+
+    # 回答期間中はサーバーを起こしたままにし、期限を過ぎたら自動で止まるようにする
+    import keepalive
+    note = keepalive.arm(deadline_raw)
+    if note:
+        result = f"{result}\n\n{note}"
+
     return f"<pre>{result}</pre>"
 
 
