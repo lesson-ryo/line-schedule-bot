@@ -195,6 +195,16 @@ def send_schedule(
 
 
 DEFAULT_NOTIFY_MESSAGE = "レッスン日程が確定しましたのでお知らせします。"
+def _skip_lines() -> list[str]:
+    """「今回は参加できません」と回答した人を整形して返す"""
+    skips = load_json("skips")
+    if not skips:
+        return []
+    members = {m["user_id"]: m["display_name"] for m in load_json("members")}
+    names = [members.get(u, u) for u in skips]
+    return ["", "=== 今回は参加できない人 ===", "", f"  {', '.join(names)}（{len(names)}人）"]
+
+
 def _location_lines() -> list[str]:
     """回答者が選んだ教室を整形して返す"""
     locations = load_json("locations")
@@ -231,7 +241,7 @@ def summarize_replies() -> str:
         return "送信済みの候補が見つかりません。先に候補を送信してください。"
 
     if not votes:
-        return "\n".join(["まだ投票がありません。"] + _location_lines() + _comment_lines())
+        return "\n".join(["まだ投票がありません。"] + _skip_lines() + _location_lines() + _comment_lines())
 
     tally = {i: [] for i in range(1, len(candidates) + 1)}
     for v in votes:
@@ -247,6 +257,7 @@ def summarize_replies() -> str:
     best = max(tally, key=lambda k: len(tally[k]))
     lines.append("")
     lines.append(f"最多得票: 候補{best}「{candidates[best-1]}」（{len(tally[best])}人）")
+    lines.extend(_skip_lines())
     lines.extend(_location_lines())
     lines.extend(_comment_lines())
 
@@ -257,7 +268,9 @@ def reset_replies() -> str:
     save_json("votes", [])
     save_json("comments", [])
     save_json("locations", [])
-    return "回答データ（日程・教室・連絡事項）をリセットしました。"
+    save_json("skips", [])
+    save_json("assignment", [])
+    return "回答データ（日程・教室・連絡事項・割り当て）をリセットしました。"
 
 
 if __name__ == "__main__":

@@ -186,6 +186,11 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
 <div id="formArea">
 <div id="editNote"></div>
 <h1>都合の良い日程をすべて選んでください</h1>
+
+<label id="skipBox" style="border:1px solid #e0c0c0;background:#fdf6f6">
+  <input type="checkbox" id="skip" onchange="onSkipChange()">今回は参加できません
+</label>
+
 <form id="form"></form>
 
 <div id="locationBox" style="display:none">
@@ -305,6 +310,7 @@ async function loadPrevious() {
       if (el) el.checked = true;
     }
     if (prev.comment) document.getElementById("comment").value = prev.comment;
+    if (prev.skip) { document.getElementById("skip").checked = true; onSkipChange(); }
 
     const note = document.getElementById("editNote");
     note.innerHTML =
@@ -315,7 +321,36 @@ async function loadPrevious() {
   } catch (e) {}
 }
 
+function onSkipChange() {
+  const off = document.getElementById("skip").checked;
+  document.getElementById("form").style.opacity = off ? "0.4" : "1";
+  document.getElementById("form").style.pointerEvents = off ? "none" : "auto";
+  const locBox = document.getElementById("locationBox");
+  if (locBox) {
+    locBox.style.opacity = off ? "0.4" : "1";
+    locBox.style.pointerEvents = off ? "none" : "auto";
+  }
+  if (off) {
+    document.querySelectorAll('input[name="candidate"]:checked').forEach(el => el.checked = false);
+    updateDayCounts();
+  }
+}
+
 function showDone() {
+  if (document.getElementById("skip").checked) {
+    const comment = document.getElementById("comment").value.trim();
+    let html = '<div class="sec">今回は参加できません</div>';
+    if (comment) html += '<div class="sec">連絡事項</div><div>' + comment + "</div>";
+    document.getElementById("doneList").innerHTML = html;
+    document.getElementById("formArea").style.display = "none";
+    document.getElementById("done").style.display = "block";
+    window.scrollTo(0, 0);
+    return;
+  }
+  showDonePicked();
+}
+
+function showDonePicked() {
   const picked = Array.from(document.querySelectorAll('input[name="candidate"]:checked'))
     .map(el => candidates[parseInt(el.value, 10) - 1]);
   const locEl = document.querySelector('input[name="location"]:checked');
@@ -355,9 +390,10 @@ function backToEdit() {
 document.getElementById("submitBtn").addEventListener("click", async () => {
   const checked = Array.from(document.querySelectorAll('input[name="candidate"]:checked')).map(el => parseInt(el.value, 10));
 
+  const skip = document.getElementById("skip").checked;
   const locBox = document.getElementById("locationBox");
   const locEl = document.querySelector('input[name="location"]:checked');
-  if (locBox.style.display !== "none" && !locEl) {
+  if (!skip && locBox.style.display !== "none" && !locEl) {
     document.getElementById("status").textContent = "教室を選択してください。";
     locBox.scrollIntoView({ block: "center" });
     return;
@@ -370,9 +406,10 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         idToken: idToken,
-        selected: checked,
+        selected: skip ? [] : checked,
         comment: document.getElementById("comment").value,
-        location: locEl ? locEl.value : "",
+        location: skip ? "" : (locEl ? locEl.value : ""),
+        skip: skip,
       }),
     });
     const data = await res.json();
@@ -451,11 +488,13 @@ def liff_answers():
     comment = next(
         (c["text"] for c in load_json("comments") if c["user_id"] == user_id), ""
     )
+    skipped = user_id in load_json("skips")
     return {
-        "answered": bool(selected or location or comment),
+        "answered": bool(selected or location or comment or skipped),
         "selected": sorted(selected),
         "location": location,
         "comment": comment,
+        "skip": skipped,
     }
 
 
@@ -488,8 +527,15 @@ def liff_submit():
         )
     save_json("votes", votes)
 
-    # 教室（設定されている場合は必須）
-    if LOCATIONS:
+    # 「今回は参加できません」— 未回答と区別するために記録する
+    skip = bool(body.get("skip"))
+    skips = [s for s in load_json("skips") if s != user_id]
+    if skip:
+        skips.append(user_id)
+    save_json("skips", skips)
+
+    # 教室（設定されている場合は必須。欠席の場合は不要）
+    if LOCATIONS and not skip:
         location = (body.get("location") or "").strip()
         if location not in LOCATIONS:
             return {"error": "教室を選択してください。"}, 400
@@ -672,6 +718,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div class="lbl">通知メッセージの前置き</div>
   <textarea id="notifyMessage" rows="2" oninput="saveNotifyMessage()"></textarea>
   <div class="row" style="margin-top:8px">
+    <button class="sub" onclick="go('schedule')">担当を手動で調整する</button>
     <button class="sub" onclick="goNotify()">送信内容を確認する</button>
     <button class="mini" onclick="resetNotifyMessage()">初期文に戻す</button>
   </div>
@@ -1028,8 +1075,193 @@ def admin_assign():
     panel = f"/admin/panel?token={ADMIN_TOKEN}"
     body = assign_mod.format_result(result)
     notify = f"/admin/notify?token={ADMIN_TOKEN}"
-    links = f'<p><a href="{notify}">この内容を各自にLINEで送る</a>　<a href="{panel}">管理画面に戻る</a></p>'
+    edit = f"/admin/schedule?token={ADMIN_TOKEN}"
+    links = (
+        f'<p><a href="{edit}">担当を手動で調整する</a>　'
+        f'<a href="{notify}">この内容を各自にLINEで送る</a>　'
+        f'<a href="{panel}">管理画面に戻る</a></p>'
+    )
     return f"<pre>{body}</pre>{links}"
+
+
+SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>割り当ての調整</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; max-width: 760px; margin: 0 auto; padding: 20px; color: #222; background: #fafafa; }
+  h1 { font-size: 20px; }
+  .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 16px; }
+  .day { font-weight: 600; color: #06783b; background: #f6fbf8; padding: 8px 10px; border-radius: 6px; margin: 14px 0 6px; }
+  .slot { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid #f2f2f2; }
+  .slot .tm { width: 116px; font-size: 14px; white-space: nowrap; }
+  .slot select { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  .slot .loc { font-size: 12px; color: #888; white-space: nowrap; }
+  .slot.changed select { border-color: #06C755; background: #f4fbf7; }
+  button { padding: 10px 16px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; background: #06C755; color: #fff; }
+  button.sub { background: #eee; color: #333; }
+  .muted { color: #888; font-size: 13px; }
+  #msg { margin-top: 10px; padding: 10px; border-radius: 8px; font-size: 13px; display: none; }
+  #msg.ok { background: #f0f9f3; border: 1px solid #b6e2c6; display: block; }
+  #msg.err { background: #fdf2f2; border: 1px solid #e0b4b4; display: block; }
+</style>
+</head>
+<body>
+<h1>割り当ての調整</h1>
+<div class="card">
+  <div class="muted">担当を入れ替えたり、空きに変更できます。変更した行は緑色になります。</div>
+  <div id="list"></div>
+  <div style="margin-top:16px">
+    <button onclick="save()">この内容で保存する</button>
+    <button class="sub" onclick="location.href='/admin/panel?token=' + encodeURIComponent(TOKEN)">戻る</button>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+let data = null;
+
+function render() {
+  const box = document.getElementById('list');
+  if (!data.schedule.length) {
+    box.innerHTML = '<p class="muted">割り当てがありません。先に「時間枠を自動で割り当てる」を実行してください。</p>';
+    return;
+  }
+  const opts = ['<option value="">（空き）</option>']
+    .concat(data.names.map(n => '<option value="' + n + '">' + n + '</option>')).join('');
+  let html = '', lastDay = '';
+  data.schedule.forEach((s, i) => {
+    if (s.day !== lastDay) { html += '<div class="day">' + s.day + '</div>'; lastDay = s.day; }
+    html += '<div class="slot" id="slot' + i + '">'
+      + '<span class="tm">' + s.time + '-' + s.end + '</span>'
+      + '<select data-i="' + i + '" onchange="mark(' + i + ')">' + opts + '</select>'
+      + '<span class="loc">' + (s.location || '') + '</span>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+  data.schedule.forEach((s, i) => {
+    const sel = document.querySelector('select[data-i="' + i + '"]');
+    sel.value = s.name || '';
+    sel.dataset.orig = s.name || '';
+  });
+}
+function mark(i) {
+  const sel = document.querySelector('select[data-i="' + i + '"]');
+  document.getElementById('slot' + i).classList.toggle('changed', sel.value !== sel.dataset.orig);
+}
+async function save() {
+  const names = Array.from(document.querySelectorAll('select[data-i]')).map(s => s.value);
+  const dup = names.filter((n, i) => n && names.indexOf(n) !== i);
+  if (dup.length && !confirm('同じ人が複数の枠に入っています（' + [...new Set(dup)].join('、') + '）。このまま保存しますか？')) return;
+  const box = document.getElementById('msg');
+  box.className = ''; box.style.display = 'none';
+  try {
+    const res = await fetch('/admin/schedule/save?token=' + encodeURIComponent(TOKEN), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: names }),
+    });
+    const r = await res.json();
+    box.className = res.ok ? 'ok' : 'err';
+    box.textContent = res.ok ? '保存しました。通知にはこの内容が使われます。' : ('エラー: ' + (r.error || ''));
+    if (res.ok) { data = r; render(); }
+  } catch (e) {
+    box.className = 'err'; box.textContent = 'エラー: ' + e;
+  }
+}
+(async () => {
+  const res = await fetch('/admin/schedule.json?token=' + encodeURIComponent(TOKEN));
+  data = await res.json();
+  render();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+def _entity_directory():
+    """名前 → (member_ids, グループかどうか, 教室) の対応表を作る"""
+    import assign as assign_mod
+
+    candidates = load_json("candidates", default=[])
+    votes = load_json("votes")
+    quotas = load_json("quotas", default={})
+    groups = load_json("groups", default={})
+    locations = {l["user_id"]: l["location"] for l in load_json("locations")}
+
+    avail, names = assign_mod.build_availability(candidates, votes)
+    entities = assign_mod.build_entities(avail, names, quotas, locations, groups)
+
+    directory = {
+        e["name"]: {
+            "member_ids": list(e["member_ids"]),
+            "is_group": e["is_group"],
+            "location": e["location"],
+        }
+        for e in entities.values()
+    }
+    # 回答していない人も手動で入れられるようにしておく
+    for m in load_json("members"):
+        directory.setdefault(
+            m["display_name"],
+            {"member_ids": [m["user_id"]], "is_group": False, "location": ""},
+        )
+    return directory
+
+
+@app.route("/admin/schedule", methods=["GET"])
+def admin_schedule():
+    """割り当て結果を手動で調整する画面"""
+    check_admin_token()
+    return SCHEDULE_EDIT_HTML
+
+
+@app.route("/admin/schedule.json", methods=["GET"])
+def admin_schedule_json():
+    """調整画面が読み込む、現在の割り当てと選択肢"""
+    check_admin_token()
+    return {
+        "schedule": load_json("assignment", default=[]),
+        "names": sorted(_entity_directory().keys()),
+    }
+
+
+@app.route("/admin/schedule/save", methods=["POST"])
+def admin_schedule_save():
+    """調整した割り当てを保存する。空欄にした枠は削除される。"""
+    check_admin_token()
+    body = request.get_json(silent=True) or {}
+    names = body.get("names", [])
+
+    schedule = load_json("assignment", default=[])
+    if len(names) != len(schedule):
+        return {"error": "画面が古くなっています。読み込み直してください。"}, 400
+
+    directory = _entity_directory()
+    updated = []
+    for slot, name in zip(schedule, names):
+        name = (name or "").strip()
+        if not name:
+            continue  # 空きにした枠は削除
+        info = directory.get(name)
+        if not info:
+            return {"error": f"「{name}」が見つかりません。"}, 400
+        slot = dict(slot)
+        slot["name"] = name
+        slot["member_ids"] = info["member_ids"]
+        slot["is_group"] = info["is_group"]
+        slot["location"] = info["location"] or slot.get("location", "")
+        slot["absent"] = []
+        slot["manual"] = True
+        updated.append(slot)
+
+    save_json("assignment", updated)
+    return {"schedule": updated, "names": sorted(directory.keys())}
 
 
 @app.route("/admin/notify", methods=["GET"])
