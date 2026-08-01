@@ -1039,6 +1039,13 @@ def admin_keepalive():
         msg = keepalive.disarm() or "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
         return f'<pre>{msg}</pre><p><a href="{panel}">管理画面に戻る</a></p>'
 
+    # ?arm=YYYY-MM-DD で、送信を伴わずに期限だけセットし直す（送信済みの期限を延ばしたいとき用）
+    arm_date = request.args.get("arm")
+    if arm_date is not None:
+        msg = keepalive.arm(arm_date.strip()) or "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
+        back = f"/admin/keepalive?token={ADMIN_TOKEN}"
+        return f'<pre>{msg}</pre><p><a href="{back}">状態を見る</a>　<a href="{panel}">管理画面に戻る</a></p>'
+
     s = keepalive.status()
     if not s.get("configured"):
         body = "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
