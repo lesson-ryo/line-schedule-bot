@@ -381,6 +381,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   .member { display: flex; justify-content: space-between; align-items: center; padding: 6px 4px; font-size: 14px; border-bottom: 1px solid #f4f4f4; }
   .member .qwrap { font-size: 12px; color: #888; white-space: nowrap; }
   .member .quota { width: 52px; padding: 5px; margin-left: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; text-align: center; }
+  .member .group { width: 110px; padding: 5px; margin: 0 10px 0 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
   .links a { font-size: 13px; margin-right: 14px; }
 </style>
 </head>
@@ -623,8 +624,9 @@ async function loadMembers() {
     box.innerHTML = data.members.map((m, i) =>
       `<div class="member">
          <label><input type="checkbox" value="${i + 1}" checked> ${i + 1}. ${m.name}</label>
-         <span class="qwrap">コマ数
-           <input class="quota" type="number" min="0" max="9" value="${m.quota}">
+         <span class="qwrap">
+           グループ <input class="group" type="text" placeholder="個人" value="${m.group || ''}">
+           コマ数 <input class="quota" type="number" min="0" max="9" value="${m.quota}">
          </span>
        </div>`
     ).join('');
@@ -662,7 +664,10 @@ function go(path) { location.href = '/admin/' + path + '?token=' + encodeURIComp
 function runAssign() {
   const qs = Array.from(document.querySelectorAll('#members .quota')).map(i => i.value || '1');
   if (!qs.length) { alert('メンバーがまだ登録されていません。'); return; }
-  location.href = '/admin/assign?token=' + encodeURIComponent(TOKEN) + '&quotas=' + qs.join(',');
+  const gs = Array.from(document.querySelectorAll('#members .group')).map(i => i.value.trim());
+  location.href = '/admin/assign?token=' + encodeURIComponent(TOKEN)
+    + '&quotas=' + qs.join(',')
+    + '&groups=' + encodeURIComponent(gs.join('|'));
 }
 
 initMessage();
@@ -688,9 +693,14 @@ def admin_members_json():
     check_admin_token()
     members = load_json("members")
     quotas = load_json("quotas", default={})
+    groups = load_json("groups", default={})
     return {
         "members": [
-            {"name": m["display_name"], "quota": int(quotas.get(m["user_id"], 1))}
+            {
+                "name": m["display_name"],
+                "quota": int(quotas.get(m["user_id"], 1)),
+                "group": groups.get(m["user_id"], ""),
+            }
             for m in members
         ]
     }
@@ -698,24 +708,28 @@ def admin_members_json():
 
 @app.route("/admin/assign", methods=["GET"])
 def admin_assign():
-    """?token=...&quotas=1,2,1 の形式で、回答をもとに時間枠を自動割り当てする。
-    quotasはメンバー一覧の並び順に対応するコマ数（省略時は全員1コマ）。"""
+    """?token=...&quotas=1,2,1&groups=|A班|A班 の形式で、回答をもとに時間枠を自動割り当てする。
+    quotas（カンマ区切り）とgroups（縦棒区切り）はメンバー一覧の並び順に対応する。
+    グループ名が同じ人は1組として扱い、空欄なら個人レッスン扱い。"""
     check_admin_token()
     import assign as assign_mod
 
     members = load_json("members")
-    raw = request.args.get("quotas", "")
-    counts = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+    counts = [int(x) for x in request.args.get("quotas", "").split(",") if x.strip().isdigit()]
+    group_raw = request.args.get("groups", "")
+    group_names = group_raw.split("|") if group_raw else []
 
-    quotas = {}
+    quotas, groups = {}, {}
     for i, mem in enumerate(members):
         quotas[mem["user_id"]] = counts[i] if i < len(counts) else 1
+        groups[mem["user_id"]] = group_names[i].strip() if i < len(group_names) else ""
     save_json("quotas", quotas)
+    save_json("groups", groups)
 
     candidates = load_json("candidates", default=[])
     votes = load_json("votes")
     locations = {l["user_id"]: l["location"] for l in load_json("locations")}
-    result = assign_mod.auto_assign(candidates, votes, quotas, locations)
+    result = assign_mod.auto_assign(candidates, votes, quotas, locations, groups)
 
     panel = f"/admin/panel?token={ADMIN_TOKEN}"
     body = assign_mod.format_result(result)
