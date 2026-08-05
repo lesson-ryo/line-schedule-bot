@@ -28,6 +28,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 
 from storage import load_json, save_json
+from carte import create_carte_blueprint
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
@@ -473,6 +474,12 @@ def verify_liff_user(id_token: str):
     return user_id, payload.get("name", user_id)
 
 
+# 日程調整と同じLINE認証・Upstash・管理トークンを使う生徒カルテ。
+app.register_blueprint(
+    create_carte_blueprint(verify_liff_user, upsert_member, ADMIN_TOKEN, LIFF_ID)
+)
+
+
 @app.route("/liff/answers", methods=["POST"])
 def liff_answers():
     """前回の回答内容を返す（フォームを開き直したときに反映するため）"""
@@ -707,6 +714,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <button onclick="send()" id="sendBtn">この内容でLINEに送信する</button>
   <div id="result"></div>
   <div class="links" style="margin-top:14px">
+    <a href="#" onclick="location.href='/admin/carte?token='+encodeURIComponent(TOKEN);return false;">生徒カルテを開く</a>
     <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
     <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
     <a href="#" onclick="if(confirm('回答データを削除します。よろしいですか？'))go('reset');return false;">回答をリセットする</a>
