@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import hmac
 import io
 import os
 import time
 from datetime import datetime, timezone
 
 import requests
-from flask import Blueprint, abort, request
+from flask import Blueprint, abort, make_response, redirect, request
 
 from storage import load_json, save_json
 
@@ -178,6 +180,12 @@ getData().catch(e=>summary.innerHTML='<section class="panel"><div class="empty">
 </script></body></html>"""
 
 
+ADMIN_LOGIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ログイン</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#202428;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;min-height:100vh;display:grid;place-items:center}.box{width:min(420px,calc(100% - 32px));background:#fff;border:1px solid #dfe3e6;border-radius:12px;padding:30px;box-shadow:0 8px 30px rgba(20,40,30,.08)}h1{font-size:22px;margin:0 0 8px}.sub{color:#687078;font-size:14px;margin:0 0 24px}label{display:block;font-size:13px;font-weight:700;margin-bottom:7px}input{width:100%;height:46px;border:1px solid #bcc3c7;border-radius:7px;padding:0 12px;font-size:17px}button{width:100%;height:46px;border:0;border-radius:7px;background:#087f5b;color:#fff;font-size:16px;font-weight:700;margin-top:16px;cursor:pointer}.error{background:#fff1f0;color:#a52b21;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:16px}
+</style></head><body><main class="box"><h1>講師用カルテ</h1><p class="sub">管理用の合言葉を入力してください。</p>__ERROR__<form method="post" action="/admin/carte/login"><label for="password">合言葉</label><input id="password" name="password" type="password" autocomplete="current-password" autofocus required><button type="submit">ログイン</button></form></main></body></html>"""
+
+
 def render_student_page(liff_id):
     return STUDENT_HTML.replace("__LIFF_ID__", liff_id)
 
@@ -185,8 +193,22 @@ def render_student_page(liff_id):
 def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id):
     bp = Blueprint("carte", __name__)
 
+    def admin_cookie_value():
+        return hmac.new(
+            admin_token.encode("utf-8"), b"carte-admin-login", hashlib.sha256
+        ).hexdigest()
+
+    def is_admin():
+        if not admin_token:
+            return False
+        supplied = request.args.get("token", "")
+        cookie = request.cookies.get("carte_admin", "")
+        return hmac.compare_digest(supplied, admin_token) or hmac.compare_digest(
+            cookie, admin_cookie_value()
+        )
+
     def require_admin():
-        if not admin_token or request.args.get("token", "") != admin_token:
+        if not is_admin():
             abort(403)
 
     @bp.get("/carte")
@@ -218,8 +240,35 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
 
     @bp.get("/admin/carte")
     def admin_page():
-        require_admin()
+        if not is_admin():
+            return ADMIN_LOGIN_HTML.replace("__ERROR__", "")
+        if request.args.get("token"):
+            response = make_response(redirect("/admin/carte"))
+            response.set_cookie(
+                "carte_admin", admin_cookie_value(), max_age=60 * 60 * 24 * 30,
+                secure=True, httponly=True, samesite="Strict"
+            )
+            return response
         return ADMIN_HTML
+
+    @bp.post("/admin/carte/login")
+    def admin_login():
+        password = request.form.get("password", "")
+        if not admin_token or not hmac.compare_digest(password, admin_token):
+            error = '<div class="error">合言葉が違います。もう一度お試しください。</div>'
+            return ADMIN_LOGIN_HTML.replace("__ERROR__", error), 401
+        response = make_response(redirect("/admin/carte"))
+        response.set_cookie(
+            "carte_admin", admin_cookie_value(), max_age=60 * 60 * 24 * 30,
+            secure=True, httponly=True, samesite="Strict"
+        )
+        return response
+
+    @bp.post("/admin/carte/logout")
+    def admin_logout():
+        response = make_response(redirect("/admin/carte"))
+        response.delete_cookie("carte_admin", secure=True, httponly=True, samesite="Strict")
+        return response
 
     @bp.get("/admin/carte/data")
     def admin_data():
