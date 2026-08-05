@@ -28,6 +28,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 
 from storage import load_json, save_json
+from carte import create_carte_blueprint
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
@@ -298,6 +299,30 @@ def liff_candidates():
     }
 
 
+def verify_liff_user(id_token: str):
+    """LIFFのIDトークンをLINE側で検証して (user_id, 表示名) を返す。"""
+    if not id_token:
+        return None, "idTokenがありません。"
+    verify_res = requests.post(
+        "https://api.line.me/oauth2/v2.1/verify",
+        data={"id_token": id_token, "client_id": LINE_CHANNEL_ID},
+        timeout=10,
+    )
+    if verify_res.status_code != 200:
+        return None, "認証に失敗しました。もう一度LINEアプリ内から開き直してください。"
+    payload = verify_res.json()
+    user_id = payload.get("sub", "")
+    if not user_id:
+        return None, "ユーザー情報を取得できませんでした。"
+    return user_id, payload.get("name", user_id)
+
+
+# 現行の日程調整とは別ルートで、生徒カルテを追加する。
+app.register_blueprint(
+    create_carte_blueprint(verify_liff_user, upsert_member, ADMIN_TOKEN, LIFF_ID)
+)
+
+
 @app.route("/liff/submit", methods=["POST"])
 def liff_submit():
     """LIFFフォームからの投票送信を受け取る。idTokenをLINE側のverifyエンドポイントで検証し、
@@ -514,6 +539,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <button onclick="send()" id="sendBtn">この内容でLINEに送信する</button>
   <div id="result"></div>
   <div class="links" style="margin-top:14px">
+    <a href="#" onclick="location.href='/admin/carte?token='+encodeURIComponent(TOKEN);return false;">生徒カルテを開く</a>
     <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
     <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
     <a href="#" onclick="if(confirm('回答データを削除します。よろしいですか？'))go('reset');return false;">回答をリセットする</a>
