@@ -175,6 +175,10 @@ getData().catch(e=>summary.innerHTML='<p>'+esc(e.message)+'</p>');
 </script></body></html>"""
 
 
+def render_student_page(liff_id):
+    return STUDENT_HTML.replace("__LIFF_ID__", liff_id)
+
+
 def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id):
     bp = Blueprint("carte", __name__)
 
@@ -185,7 +189,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
     @bp.get("/carte")
     @bp.get("/liff/carte")
     def student_page():
-        return STUDENT_HTML.replace("__LIFF_ID__", liff_id)
+        return render_student_page(liff_id)
 
     @bp.post("/api/carte/me")
     def my_carte():

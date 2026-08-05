@@ -28,12 +28,13 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 
 from storage import load_json, save_json
-from carte import create_carte_blueprint
+from carte import create_carte_blueprint, render_student_page
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 LIFF_ID = os.environ.get("LIFF_ID", "")
+CARTE_LIFF_ID = os.environ.get("CARTE_LIFF_ID", LIFF_ID)
 LINE_CHANNEL_ID = os.environ.get("LINE_CHANNEL_ID", "")
 # 管理画面の見出しに表示する名前（関西用・関東用など複数運用時の見分け用）
 PANEL_NAME = os.environ.get("PANEL_NAME", "日程調整Bot")
@@ -284,6 +285,8 @@ main().catch(e => {
 def liff_page():
     """LIFF(LINEアプリ内ブラウザ)で開くチェックボックス式の投票フォーム。
     候補数が多いとき(schedule_tools.LIFF_THRESHOLD超)はこちらへのリンクを送る。"""
+    if request.args.get("view") == "carte":
+        return render_student_page(LIFF_ID)
     return LIFF_PAGE_HTML.replace("__LIFF_ID__", LIFF_ID)
 
 
@@ -319,7 +322,7 @@ def verify_liff_user(id_token: str):
 
 # 現行の日程調整とは別ルートで、生徒カルテを追加する。
 app.register_blueprint(
-    create_carte_blueprint(verify_liff_user, upsert_member, ADMIN_TOKEN, LIFF_ID)
+    create_carte_blueprint(verify_liff_user, upsert_member, ADMIN_TOKEN, CARTE_LIFF_ID)
 )
 
 
