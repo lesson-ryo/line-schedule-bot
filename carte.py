@@ -30,6 +30,9 @@ SHEET_CSV_URL = os.environ.get(
 _material_cache = {"at": 0.0, "items": []}
 VALID_STATUSES = {"planned", "practicing", "completed", "paused"}
 
+# シートの列順。列を増やしたときはここだけ直せばよい。
+COLUMNS = ["id", "instrument", "kind", "title", "artist", "video", "note"]
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
@@ -45,22 +48,24 @@ def load_materials(force=False):
     next(rows, None)
     items = []
     for row in rows:
-        row += [""] * (6 - len(row))
-        material_id, kind, title, artist, video = [v.strip() for v in row[:5]]
-        if not material_id.isdigit() or not title:
+        row += [""] * (len(COLUMNS) - len(row))
+        values = dict(zip(COLUMNS, [v.strip() for v in row[: len(COLUMNS)]]))
+        if not values["id"].isdigit() or not values["title"]:
             continue
-        items.append(
-            {
-                "id": int(material_id),
-                "kind": kind,
-                "title": title,
-                "artist": artist,
-                "video": video,
-            }
-        )
+        values["id"] = int(values["id"])
+        items.append(values)
     items.sort(key=lambda x: x["id"], reverse=True)
     _material_cache.update(at=time.time(), items=items)
     return items
+
+
+def _instruments():
+    """シートに実際に登場する楽器の一覧（生徒画面のタブ用）。"""
+    seen = []
+    for m in load_materials():
+        if m["instrument"] and m["instrument"] not in seen:
+            seen.append(m["instrument"])
+    return seen
 
 
 def _progress():
@@ -148,15 +153,15 @@ def _upsert_progress(user_id, display_name, material_id, changes, actor):
 STUDENT_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>マイカルテ</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script><style>
-*{box-sizing:border-box}body{margin:0;background:#f6f7f8;color:#202124;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}.head{position:sticky;top:0;z-index:2;background:#fff;padding:16px;border-bottom:1px solid #ddd}.head h1{font-size:20px;margin:0 0 12px}.search{width:100%;padding:12px;border:1px solid #ccc;border-radius:10px;font-size:16px}.tabs{display:flex;gap:6px;overflow:auto;padding-top:10px}.tabs button{white-space:nowrap;border:0;border-radius:18px;padding:8px 12px}.tabs .on{background:#06c755;color:#fff}.wrap{padding:12px;max-width:720px;margin:auto}.card{background:#fff;border:1px solid #e2e2e2;border-radius:12px;padding:14px;margin-bottom:10px}.title{font-weight:700}.sub{font-size:13px;color:#777;margin:4px 0 10px}.row{display:flex;gap:8px}.row select,.row button{flex:1;padding:10px;border-radius:8px;border:1px solid #ccc;background:#fff}.note{width:100%;margin-top:9px;padding:9px;border:1px solid #ddd;border-radius:8px}.next{color:#d26900;font-size:12px;font-weight:700}.empty{text-align:center;color:#888;padding:40px 10px}.video{font-size:13px;color:#087f5b}.save{background:#06c755!important;color:#fff;border:0!important}#msg{padding:10px;text-align:center;color:#666}
-</style></head><body><div class="head"><h1 id="heading">マイカルテ</h1><input class="search" id="q" placeholder="曲名・アーティストを検索"><div class="tabs" id="tabs"></div></div><div id="msg">読み込み中…</div><main class="wrap" id="list"></main><script>
-const LIFF_ID='__LIFF_ID__', labels={all:'すべて',next:'次回',practicing:'練習中',planned:'練習予定',completed:'完了',paused:'保留'};let token='',materials=[],progress={},filter='practicing';
+*{box-sizing:border-box}body{margin:0;background:#f6f7f8;color:#202124;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}.head{position:sticky;top:0;z-index:2;background:#fff;padding:16px;border-bottom:1px solid #ddd}.head h1{font-size:20px;margin:0 0 12px}.search{width:100%;padding:12px;border:1px solid #ccc;border-radius:10px;font-size:16px}.tabs{display:flex;gap:6px;overflow:auto;padding-top:10px}.tabs button{white-space:nowrap;border:0;border-radius:18px;padding:8px 12px}.tabs .on{background:#06c755;color:#fff}.tabs .oni{background:#3a6ea5;color:#fff}.wrap{padding:12px;max-width:720px;margin:auto}.card{background:#fff;border:1px solid #e2e2e2;border-radius:12px;padding:14px;margin-bottom:10px}.title{font-weight:700}.sub{font-size:13px;color:#777;margin:4px 0 10px}.row{display:flex;gap:8px}.row select,.row button{flex:1;padding:10px;border-radius:8px;border:1px solid #ccc;background:#fff}.note{width:100%;margin-top:9px;padding:9px;border:1px solid #ddd;border-radius:8px}.next{color:#d26900;font-size:12px;font-weight:700}.empty{text-align:center;color:#888;padding:40px 10px}.video{font-size:13px;color:#087f5b}.save{background:#06c755!important;color:#fff;border:0!important}#msg{padding:10px;text-align:center;color:#666}
+</style></head><body><div class="head"><h1 id="heading">マイカルテ</h1><input class="search" id="q" placeholder="曲名・アーティストを検索"><div class="tabs" id="itabs"></div><div class="tabs" id="tabs"></div></div><div id="msg">読み込み中…</div><main class="wrap" id="list"></main><script>
+const LIFF_ID='__LIFF_ID__', labels={all:'すべて',next:'次回',practicing:'練習中',planned:'練習予定',completed:'完了',paused:'保留'};let token='',materials=[],instruments=[],progress={},filter='practicing',inst='all';
 const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,idToken:token})});const d=await r.json();if(!r.ok)throw Error(d.error||'エラー');return d}
-function drawTabs(){tabs.innerHTML=Object.entries(labels).map(([k,v])=>`<button class="${filter===k?'on':''}" onclick="filter='${k}';drawTabs();draw()">${v}</button>`).join('')}
-function draw(){let q=document.getElementById('q').value.toLowerCase();let xs=materials.filter(m=>{let p=progress[m.id];if(filter==='next'&&!p?.next_lesson)return false;if(!['all','next'].includes(filter)&&p?.status!==filter)return false;return (m.title+' '+m.artist+' '+m.kind).toLowerCase().includes(q)});list.innerHTML=xs.length?xs.map(m=>{let p=progress[m.id]||{};return `<section class="card"><div class="${p.next_lesson?'next':''}">${p.next_lesson?'★ 次回レッスン':''}</div><div class="title">${esc(m.title)}</div><div class="sub">${esc([m.artist,m.kind].filter(Boolean).join(' ／ '))}</div>${m.video?`<a class="video" href="${esc(m.video.split(/\s/).find(x=>x.startsWith('http'))||'#')}">演奏動画を開く</a>`:''}<div class="row"><select id="s${m.id}">${Object.entries(labels).filter(x=>!['all','next'].includes(x[0])).map(([k,v])=>`<option value="${k}" ${(p.status||'planned')===k?'selected':''}>${v}</option>`).join('')}</select><button class="save" onclick="save(${m.id})">保存</button></div><textarea class="note" id="n${m.id}" rows="2" placeholder="自分用メモ">${esc(p.student_note)}</textarea>${p.teacher_note?`<div class="sub">講師メモ：${esc(p.teacher_note)}</div>`:''}</section>`}).join(''):'<div class="empty">該当する曲はありません</div>'}
+function drawTabs(){itabs.innerHTML=instruments.length<2?'':['all'].concat(instruments).map(k=>'<button class="'+(inst===k?'oni':'')+'" onclick="inst=&#39;'+k+'&#39;;drawTabs();draw()">'+(k==='all'?'すべての楽器':esc(k))+'</button>').join('');tabs.innerHTML=Object.entries(labels).map(([k,v])=>`<button class="${filter===k?'on':''}" onclick="filter='${k}';drawTabs();draw()">${v}</button>`).join('')}
+function draw(){let q=document.getElementById('q').value.toLowerCase();let xs=materials.filter(m=>{let p=progress[m.id];if(inst!=='all'&&m.instrument!==inst)return false;if(filter==='next'&&!p?.next_lesson)return false;if(!['all','next'].includes(filter)&&p?.status!==filter)return false;return (m.title+' '+m.artist+' '+m.kind).toLowerCase().includes(q)});list.innerHTML=xs.length?xs.map(m=>{let p=progress[m.id]||{};return `<section class="card"><div class="${p.next_lesson?'next':''}">${p.next_lesson?'★ 次回レッスン':''}</div><div class="title">${esc(m.title)}</div><div class="sub">${esc([m.artist,m.instrument,m.kind].filter(Boolean).join(' ／ '))}</div>${m.video?`<a class="video" href="${esc(m.video.split(/\s/).find(x=>x.startsWith('http'))||'#')}">演奏動画を開く</a>`:''}<div class="row"><select id="s${m.id}">${Object.entries(labels).filter(x=>!['all','next'].includes(x[0])).map(([k,v])=>`<option value="${k}" ${(p.status||'planned')===k?'selected':''}>${v}</option>`).join('')}</select><button class="save" onclick="save(${m.id})">保存</button></div><textarea class="note" id="n${m.id}" rows="2" placeholder="自分用メモ">${esc(p.student_note)}</textarea>${p.teacher_note?`<div class="sub">講師メモ：${esc(p.teacher_note)}</div>`:''}</section>`}).join(''):'<div class="empty">該当する曲はありません</div>'}
 async function save(id){try{let p=await api('/api/carte/progress',{material_id:id,status:document.getElementById('s'+id).value,student_note:document.getElementById('n'+id).value});progress[id]=p.progress;draw()}catch(e){alert(e.message)}}
-async function main(){await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login();return}token=liff.getIDToken();let d=await api('/api/carte/me',{});materials=d.materials;progress=Object.fromEntries(d.progress.map(p=>[p.material_id,p]));heading.textContent=(d.display_name||'')+'さんのカルテ';msg.style.display='none';drawTabs();draw();q.oninput=draw}
+async function main(){await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login();return}token=liff.getIDToken();let d=await api('/api/carte/me',{});materials=d.materials;instruments=d.instruments||[];progress=Object.fromEntries(d.progress.map(p=>[p.material_id,p]));heading.textContent=(d.display_name||'')+'さんのカルテ';msg.style.display='none';drawTabs();draw();q.oninput=draw}
 main().catch(e=>msg.textContent=e.message);
 </script></body></html>"""
 
@@ -169,7 +174,7 @@ const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 async function getData(){let r=await fetch('/admin/carte/data?token='+encodeURIComponent(token));data=await r.json();if(!r.ok)throw Error(data.error||'取得失敗');renderSummary()}
 function renderSummary(){detail.innerHTML='';summary.innerHTML=`<div class="tool"><input id="sq" placeholder="生徒名を検索" oninput="renderSummary()"><span>生徒 ${data.students.length}人／教材 ${data.materials.length}件</span></div><div class="grid">${data.students.filter(s=>!window.sq||s.display_name.includes(sq.value)).map(s=>`<div class="card" onclick="openStudent('${esc(s.user_id)}')"><div class="name">${esc(s.display_name)}</div><div class="stats">次回 ${s.next_count}曲　練習中 ${s.practicing_count}曲　完了 ${s.completed_count}曲</div><div class="meta">最終更新 ${esc(s.updated_at||'—')}</div></div>`).join('')}</div>`}
 function openStudent(uid){let s=data.students.find(x=>x.user_id===uid), p=Object.fromEntries(data.progress.filter(x=>x.user_id===uid).map(x=>[x.material_id,x]));summary.innerHTML='<span class="back" onclick="renderSummary()">← 生徒一覧へ</span>';detail.innerHTML=`<section class="detail"><h2>${esc(s.display_name)}</h2><div class="tool"><input id="mq" placeholder="曲名を検索" oninput="drawSongs('${esc(uid)}')"><select id="mf" onchange="drawSongs('${esc(uid)}')"><option value="active">登録曲</option><option value="all">全教材</option><option value="practicing">練習中</option><option value="completed">完了</option></select></div><div id="songs"></div></section>`;window.currentP=p;drawSongs(uid)}
-function drawSongs(uid){let q=(window.mq?.value||'').toLowerCase(),f=window.mf?.value||'active';let xs=data.materials.filter(m=>{let p=currentP[m.id];if(f==='active'&&!p)return false;if(!['active','all'].includes(f)&&p?.status!==f)return false;return(m.title+' '+m.artist).toLowerCase().includes(q)});songs.innerHTML=xs.slice(0,200).map(m=>{let p=currentP[m.id]||{};return `<div class="song"><b>${esc(m.title)}</b><div class="meta">${esc([m.artist,m.kind].filter(Boolean).join(' ／ '))}</div><div class="row"><select id="as${m.id}">${Object.entries(labels).map(([k,v])=>`<option value="${k}" ${(p.status||'planned')===k?'selected':''}>${v}</option>`).join('')}</select><label><input type="checkbox" id="an${m.id}" ${p.next_lesson?'checked':''}> 次回</label><button onclick="save('${esc(uid)}',${m.id})">保存</button><input id="ast${m.id}" value="${esc(p.student_note)}" placeholder="生徒メモ"><input id="at${m.id}" value="${esc(p.teacher_note)}" placeholder="講師メモ"></div></div>`}).join('')||'<p>該当する曲はありません</p>'}
+function drawSongs(uid){let q=(window.mq?.value||'').toLowerCase(),f=window.mf?.value||'active';let xs=data.materials.filter(m=>{let p=currentP[m.id];if(f==='active'&&!p)return false;if(!['active','all'].includes(f)&&p?.status!==f)return false;return(m.title+' '+m.artist).toLowerCase().includes(q)});songs.innerHTML=xs.slice(0,200).map(m=>{let p=currentP[m.id]||{};return `<div class="song"><b>${esc(m.title)}</b><div class="meta">${esc([m.artist,m.instrument,m.kind].filter(Boolean).join(' ／ '))}</div><div class="row"><select id="as${m.id}">${Object.entries(labels).map(([k,v])=>`<option value="${k}" ${(p.status||'planned')===k?'selected':''}>${v}</option>`).join('')}</select><label><input type="checkbox" id="an${m.id}" ${p.next_lesson?'checked':''}> 次回</label><button onclick="save('${esc(uid)}',${m.id})">保存</button><input id="ast${m.id}" value="${esc(p.student_note)}" placeholder="生徒メモ"><input id="at${m.id}" value="${esc(p.teacher_note)}" placeholder="講師メモ"></div></div>`}).join('')||'<p>該当する曲はありません</p>'}
 async function save(uid,id){let body={user_id:uid,material_id:id,status:document.getElementById('as'+id).value,next_lesson:document.getElementById('an'+id).checked,student_note:document.getElementById('ast'+id).value,teacher_note:document.getElementById('at'+id).value};let r=await fetch('/admin/carte/progress?token='+encodeURIComponent(token),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let d=await r.json();if(!r.ok)return alert(d.error||'保存失敗');currentP[id]=d.progress;await getData();openStudent(uid)}
 getData().catch(e=>summary.innerHTML='<p>'+esc(e.message)+'</p>');
 </script></body></html>"""
@@ -194,7 +199,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         if not user_id:
             return {"error": name}, 401
         upsert_member(user_id, name)
-        return {"display_name": name, "materials": load_materials(), "progress": _student_rows(user_id)}
+        return {"display_name": name, "materials": load_materials(), "instruments": _instruments(), "progress": _student_rows(user_id)}
 
     @bp.post("/api/carte/progress")
     def student_progress():
@@ -234,6 +239,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         return {
             "students": students,
             "materials": load_materials(),
+            "instruments": _instruments(),
             "progress": rows,
             "history": _history()[-200:],
         }
