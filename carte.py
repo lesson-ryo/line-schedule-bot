@@ -47,17 +47,22 @@ def load_materials(force=False):
     next(rows, None)
     items = []
     for row in rows:
-        row += [""] * (6 - len(row))
-        material_id, kind, title, artist, video = [v.strip() for v in row[:5]]
+        # シート列: A=ID B=楽器 C=形態 D=曲名 E=アーティスト F=Youtube G=メモ
+        row += [""] * (7 - len(row))
+        material_id, instrument, kind, title, artist, video, note = [
+            v.strip() for v in row[:7]
+        ]
         if not material_id.isdigit() or not title:
             continue
         items.append(
             {
                 "id": int(material_id),
+                "instrument": instrument,
                 "kind": kind,
                 "title": title,
                 "artist": artist,
                 "video": video,
+                "note": note,
             }
         )
     items.sort(key=lambda x: x["id"], reverse=True)
