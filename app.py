@@ -28,7 +28,6 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 
 from storage import load_json, save_json
-from carte import create_carte_blueprint
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
@@ -51,6 +50,32 @@ DEFAULT_AUTO_REPLY = "\n".join([
     "レッスンに関するご連絡・ご質問は、お手数ですが本アカウントまでお願いします。",
 ])
 AUTO_REPLY = os.environ.get("AUTO_REPLY", "").strip() or DEFAULT_AUTO_REPLY
+
+# --- 地域ごとの機能ON/OFF -------------------------------------------------
+# 同じコードを関西・関東の両方で動かし、環境変数だけで使う機能を切り替える。
+#
+#   CARTE_LIFF_ID    … 生徒カルテ用のLIFF ID。設定されていればカルテを有効にする
+#   CARTE_ENABLED    … カルテを明示的にON/OFFしたいとき（未設定ならLIFF IDの有無で判断）
+#   SCHEDULE_ENABLED … 日程調整を使わない地域ではfalseにする（未設定ならON）
+#
+# 既存の環境変数はそのまま。何も足さなければ従来どおり日程調整だけが動く。
+
+
+def _flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+CARTE_LIFF_ID = os.environ.get("CARTE_LIFF_ID", "")
+CARTE_ENABLED = _flag("CARTE_ENABLED", bool(CARTE_LIFF_ID))
+SCHEDULE_ENABLED = _flag("SCHEDULE_ENABLED", True)
+
+# 日程調整をOFFにしたときに閉じるパス。カルテと共通の /healthz などは閉じない。
+SCHEDULE_PATHS = ("/liff", "/admin/panel", "/admin/members", "/admin/assign",
+                  "/admin/schedule", "/admin/notify", "/admin/send",
+                  "/admin/summarize", "/admin/reset", "/admin/keepalive")
 
 
 def format_date_ja(value: str) -> str:
@@ -474,12 +499,6 @@ def verify_liff_user(id_token: str):
     return user_id, payload.get("name", user_id)
 
 
-# 日程調整と同じLINE認証・Upstash・管理トークンを使う生徒カルテ。
-app.register_blueprint(
-    create_carte_blueprint(verify_liff_user, upsert_member, ADMIN_TOKEN, LIFF_ID)
-)
-
-
 @app.route("/liff/answers", methods=["POST"])
 def liff_answers():
     """前回の回答内容を返す（フォームを開き直したときに反映するため）"""
@@ -714,7 +733,6 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <button onclick="send()" id="sendBtn">この内容でLINEに送信する</button>
   <div id="result"></div>
   <div class="links" style="margin-top:14px">
-    <a href="#" onclick="location.href='/admin/carte?token='+encodeURIComponent(TOKEN);return false;">生徒カルテを開く</a>
     <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
     <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
     <a href="#" onclick="if(confirm('回答データを削除します。よろしいですか？'))go('reset');return false;">回答をリセットする</a>
@@ -1501,6 +1519,31 @@ def handle_message(event):
                 messages=[TextMessage(text=AUTO_REPLY)],
             )
         )
+
+
+# --- 生徒カルテ ------------------------------------------------------------
+# CARTE_LIFF_ID（またはCARTE_ENABLED）が設定されている地域だけ有効になる。
+# 未設定の地域では読み込みもしないので、従来の日程調整の動作は一切変わらない。
+if CARTE_ENABLED:
+    from carte import create_carte_blueprint
+
+    app.register_blueprint(
+        create_carte_blueprint(
+            verify_liff_user, upsert_member, ADMIN_TOKEN, CARTE_LIFF_ID
+        )
+    )
+
+
+@app.before_request
+def _block_disabled_features():
+    """日程調整を使わない地域では、日程調整の画面を閉じる。
+    SCHEDULE_ENABLEDが未設定なら何もしない（＝従来どおり全部開いている）。"""
+    if SCHEDULE_ENABLED:
+        return None
+    path = request.path
+    if any(path == p or path.startswith(p + "/") for p in SCHEDULE_PATHS):
+        return "この地域では日程調整を使っていません。", 404
+    return None
 
 
 if __name__ == "__main__":
