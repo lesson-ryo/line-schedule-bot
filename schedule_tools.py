@@ -195,6 +195,79 @@ def send_schedule(
 
 
 DEFAULT_NOTIFY_MESSAGE = "レッスン日程が確定しましたのでお知らせします。"
+
+
+def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
+    """割り当て結果から、送る相手ごとの本文を組み立てる。
+
+    1件 = 1つの枠（個人またはグループ）。グループは同じ本文をメンバー全員に送る。
+    **各自には自分の枠だけを見せる**（他の人の予定は入れない）。
+
+    戻り値: [{"name": 表示名, "user_ids": [...], "text": 本文}, ...]
+    """
+    members = {m["user_id"]: m["display_name"] for m in load_json("members")}
+    intro = (message or DEFAULT_NOTIFY_MESSAGE).strip()
+
+    items = []
+    for slot in schedule:
+        user_ids = [u for u in slot.get("member_ids", []) if u]
+        if not user_ids:
+            continue  # 空き枠は送らない
+
+        when = f"{slot.get('day', '')} {slot.get('time', '')}〜{slot.get('end', '')}".strip()
+        lines = [intro, "", f"■ {when}"]
+
+        location = slot.get("location", "")
+        if location:
+            lines.append(f"　教室: {location}")
+
+        if slot.get("is_group"):
+            lines.append(f"　レッスン: {slot.get('name', '')}（グループ）")
+            absent = [members.get(u, u) for u in slot.get("absent", []) if u]
+            if absent:
+                lines.append(f"　※ この時間に参加できない方: {', '.join(absent)}")
+
+        lines.append("")
+        lines.append("よろしくお願いします。")
+
+        items.append(
+            {
+                "name": slot.get("name", ""),
+                "user_ids": user_ids,
+                "text": "\n".join(lines),
+            }
+        )
+    return items
+
+
+def send_notifications(items: list[dict]) -> str:
+    """build_notifications() の結果をPush送信する。
+    途中で失敗したらそこで止め、どこまで送ったかを返す（重複送信を避けるため）。"""
+    if not items:
+        return "送信する内容がありません。"
+
+    sent = 0
+    with ApiClient(configuration) as api_client:
+        line_api = MessagingApi(api_client)
+        for item in items:
+            for user_id in item["user_ids"]:
+                try:
+                    line_api.push_message(
+                        PushMessageRequest(
+                            to=user_id, messages=[TextMessage(text=item["text"])]
+                        )
+                    )
+                    sent += 1
+                except Exception as e:
+                    return (
+                        f"{sent}通まで送信しましたが、「{item['name']}」への送信でエラーになりました。\n"
+                        f"{e}\n\n"
+                        "同じ内容を再送すると重複して届く可能性があります。"
+                        "LINEの送信履歴を確認してから操作してください。"
+                    )
+    return f"{sent}通を送信しました。"
+
+
 def _skip_lines() -> list[str]:
     """「今回は参加できません」と回答した人を整形して返す"""
     skips = load_json("skips")
