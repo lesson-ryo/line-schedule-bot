@@ -1459,7 +1459,7 @@ def admin_send():
 
     # 回答期間中はサーバーを起こしたままにし、期限を過ぎたら自動で止まるようにする
     import keepalive
-    note = keepalive.arm(deadline_raw)
+    note = keepalive.arm("")
     if note:
         result = f"{result}\n\n{note}"
 
