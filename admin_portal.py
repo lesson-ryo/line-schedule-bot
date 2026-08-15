@@ -37,13 +37,21 @@ BASE_STYLE = """
 *{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#202428;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif}header{height:64px;background:#fff;border-bottom:1px solid #dfe3e6;display:flex;align-items:center;padding:0 22px;gap:14px}header h1{font-size:20px;margin:0}header a{color:#087f5b;text-decoration:none}header form{margin-left:auto}main{max-width:980px;margin:0 auto;padding:22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}.card{display:block;background:#fff;border:1px solid #dfe3e6;border-radius:11px;padding:18px;color:inherit;text-decoration:none}.card:hover{border-color:#75b9a2;box-shadow:0 5px 18px rgba(20,50,35,.07)}.card h2{font-size:17px;margin:0 0 7px}.card p,.muted{color:#687078;font-size:13px;line-height:1.55;margin:0}.tag{display:inline-block;font-size:10px;border-radius:10px;padding:3px 8px;background:#e8f4ef;color:#0f6e56;margin-bottom:9px}.button,button{display:inline-block;border:0;border-radius:7px;background:#087f5b;color:#fff;padding:10px 14px;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer}.sub{background:#fff!important;color:#374047!important;border:1px solid #bec5c9!important}.notice{background:#e9f7f0;color:#0f6e56;border-radius:7px;padding:11px 13px;margin:0 0 15px}.error{background:#fff1f0;color:#a52b21;border-radius:7px;padding:11px 13px;margin:0 0 15px}label{display:block;font-size:13px;font-weight:700;margin:14px 0 6px}input,select,textarea{width:100%;border:1px solid #bec5c9;border-radius:7px;background:#fff;padding:10px 11px;font-size:16px}select,input{height:44px}textarea{min-height:88px;resize:vertical}.form{max-width:620px;background:#fff;border:1px solid #dfe3e6;border-radius:11px;padding:20px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.actions{display:flex;gap:9px;margin-top:18px;flex-wrap:wrap}.status{width:100%;border-collapse:collapse;background:#fff;border:1px solid #dfe3e6}.status th,.status td{text-align:left;padding:11px 12px;border-bottom:1px solid #edf0f1;font-size:13px}.ok{color:#087f5b;font-weight:700}.bad{color:#b42318;font-weight:700}@media(max-width:620px){main{padding:15px}.row{grid-template-columns:1fr}header{padding:0 14px}}
 """
 
+BASE_STYLE += """
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 18px}.stat{background:#fff;border:1px solid #dfe3e6;border-radius:10px;padding:14px}.stat b{display:block;font-size:24px;margin-bottom:3px}.stat span{font-size:12px;color:#687078}.section-title{font-size:16px;margin:24px 0 10px}.pill{display:inline-block;border-radius:12px;padding:3px 8px;font-size:10px;background:#eef1f2;color:#596168}.pill.on{background:#e8f4ef;color:#0f6e56}.pill.off{background:#fff1f0;color:#a52b21}.small-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #dfe3e6}.small-table th,.small-table td{padding:10px;border-bottom:1px solid #edf0f1;text-align:left;font-size:12px;vertical-align:top}.small-table th{background:#f8faf9}.inline{display:inline}.danger{background:#fff!important;color:#a52b21!important;border:1px solid #dfb9b5!important}.warning{background:#fff8e6;color:#805400;border-radius:7px;padding:11px 13px;margin:0 0 15px}.target{background:#fff;border:1px solid #dfe3e6;border-radius:8px;padding:12px;margin:8px 0}.target b{font-size:13px}.target pre{white-space:pre-wrap;font-family:inherit;font-size:12px;color:#596168;margin:7px 0 0}.restore{border-top:1px solid #edf0f1;padding:12px 0}.restore:first-child{border-top:0}
+"""
+
 LOGIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ログイン</title><style>{{style}}body{min-height:100vh;display:grid;place-items:center}.box{width:min(420px,calc(100% - 30px));background:#fff;border:1px solid #dfe3e6;border-radius:12px;padding:28px}.box h1{font-size:22px;margin:0 0 8px}</style></head><body><main class="box"><h1>講師ログイン</h1><p class="muted">日程調整・共通カルテ・曲リストを1つの画面から管理します。</p>{% if error %}<div class="error" style="margin-top:16px">{{error}}</div>{% endif %}<form method="post" action="/admin/login"><label for="password">管理用の合言葉</label><input id="password" name="password" type="password" autocomplete="current-password" autofocus required><button type="submit" style="width:100%;margin-top:16px">ログイン</button></form></main></body></html>"""
 
-HOME_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ホーム</title><style>{{style}}</style></head><body><header><h1>講師ホーム</h1><form method="post" action="/admin/logout"><button class="sub">ログアウト</button></form></header><main><div class="grid"><a class="card" href="/kansai/admin/panel"><span class="tag">関西</span><h2>日程調整</h2><p>候補作成、LINE送信、回答集計、時間割の確定</p></a><a class="card" href="/kanto/admin/panel"><span class="tag">関東</span><h2>日程調整</h2><p>関西とは別データで候補と回答を管理</p></a><a class="card" href="/kanto/admin/carte"><span class="tag">共通</span><h2>生徒カルテ</h2><p>実施状況、やりたい曲、次回曲、生徒メモ</p></a><a class="card" href="/kanto/admin/carte/next"><span class="tag">LINE</span><h2>次回レッスンまとめ</h2><p>生徒ごとの次回曲を確認してLINEに送信</p></a><a class="card" href="/admin/songs"><span class="tag">曲リスト</span><h2>曲を追加</h2><p>曲名とYouTube URLを入力し、重複を確認して追加</p></a><a class="card" href="/admin/maintenance"><span class="tag">安全管理</span><h2>状態確認・バックアップ</h2><p>Redis、スプレッドシート、LINE設定、起動維持を確認</p></a></div></main></body></html>"""
+HOME_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ホーム</title><style>{{style}}</style></head><body><header><h1>講師ホーム</h1><form method="post" action="/admin/logout"><button class="sub">ログアウト</button></form></header><main><div class="stats"><div class="stat"><b>{{dashboard.carte.students}}</b><span>カルテ生徒</span></div><div class="stat"><b>{{dashboard.carte.next_students}}</b><span>次回曲あり</span></div><div class="stat"><b>{{dashboard.carte.open_requests}}</b><span>未対応リクエスト</span></div><div class="stat"><b>{{dashboard.carte.completed}}</b><span>実施記録</span></div></div><div class="grid">{% for name,s in dashboard.schedules.items() %}<a class="card" href="/{{name}}/admin/panel"><span class="tag">{{s.label}}</span><h2>日程調整</h2><p>回答 {{s.responded}}/{{s.members}}人 ・ 未回答 {{s.nonrespondents}}人<br>候補 {{s.candidate_count}}件 ・ 確定 {{s.assignment_count}}枠</p></a><a class="card" href="/admin/reminders/{{name}}"><span class="tag">{{s.label}} LINE</span><h2>リマインド</h2><p>未回答者だけ、または明日の生徒だけに確認を送信</p></a>{% endfor %}<a class="card" href="/kanto/admin/carte"><span class="tag">共通</span><h2>生徒カルテ</h2><p>実施状況、やりたい曲、次回曲、生徒メモ</p></a><a class="card" href="/kanto/admin/carte/next"><span class="tag">LINE</span><h2>次回レッスンまとめ</h2><p>生徒ごとの次回曲を確認してLINEに送信</p></a><a class="card" href="/admin/songs"><span class="tag">曲リスト</span><h2>曲の管理</h2><p>追加、編集、非公開化、リクエストから登録</p></a><a class="card" href="/admin/maintenance"><span class="tag">安全管理</span><h2>状態確認・バックアップ</h2><p>状態確認、保存、過去データへの復元</p></a></div>{% if dashboard.upcoming %}<h2 class="section-title">これからのレッスン</h2><table class="small-table"><tr><th>地域</th><th>日時</th><th>生徒</th></tr>{% for item in dashboard.upcoming %}<tr><td><span class="tag">{{item.label}}</span></td><td>{{item.day}} {{item.time}}〜{{item.end}}</td><td>{{item.name}}</td></tr>{% endfor %}</table>{% endif %}</main></body></html>"""
 
-SONGS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>曲を追加</title><style>{{style}}</style></head><body><header><h1>曲を追加</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}{% if error %}<div class="error">{{error}}</div>{% endif %}<form class="form" method="post" action="/admin/songs"><p class="muted">同じ曲名または動画URLがある場合は追加しません。{% if not sheet_writer %}<br>現在は共通カルテへ直接保存します。Google Sheet書き込み設定後は同じ画面からシートへ追加されます。{% endif %}</p><label for="title">曲名</label><input id="title" name="title" maxlength="120" value="{{values.get('title','')}}" required><div class="row"><div><label for="instrument">楽器</label><select id="instrument" name="instrument"><option value="">未設定</option>{% for v in ['ウクレレ','ギター'] %}<option value="{{v}}"{% if values.get('instrument')==v %} selected{% endif %}>{{v}}</option>{% endfor %}</select></div><div><label for="kind">形態</label><select id="kind" name="kind"><option value="">未設定</option>{% for v in ['弾き語り','ソロ弾き','メロ弾き','デュオ'] %}<option value="{{v}}"{% if values.get('kind')==v %} selected{% endif %}>{{v}}</option>{% endfor %}</select></div></div><label for="artist">アーティスト</label><input id="artist" name="artist" maxlength="120" value="{{values.get('artist','')}}"><label for="video">YouTube URL</label><input id="video" name="video" type="url" maxlength="500" value="{{values.get('video','')}}" placeholder="https://youtu.be/..."><div class="row"><div><label for="genre">ジャンル</label><input id="genre" name="genre" maxlength="80" value="{{values.get('genre','')}}"></div><div><label for="note">メモ</label><input id="note" name="note" maxlength="500" value="{{values.get('note','')}}"></div></div><div class="actions"><button type="submit">曲を追加する</button><a class="button sub" href="/kanto/admin/carte">カルテを開く</a></div></form></main></body></html>"""
+SONGS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>曲の管理</title><style>{{style}}</style></head><body><header><h1>曲の管理</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}{% if error %}<div class="error">{{error}}</div>{% endif %}{% if request_item %}<div class="warning">「{{request_item.title}}」のリクエスト内容を入力しました。登録すると自動で「追加済み」になります。</div>{% endif %}<form class="form" method="post" action="/admin/songs"><input type="hidden" name="material_id" value="{{values.get('material_id','')}}"><input type="hidden" name="request_id" value="{{values.get('request_id','')}}"><h2 style="font-size:17px;margin:0">{{'曲を編集' if values.get('material_id') else '新しい曲を追加'}}</h2><p class="muted" style="margin-top:7px">同じ曲名または動画URLがある場合は保存しません。非公開にしてもIDと過去カルテは残ります。</p><label for="title">曲名</label><input id="title" name="title" maxlength="120" value="{{values.get('title','')}}" required><div class="row"><div><label for="instrument">楽器</label><select id="instrument" name="instrument"><option value="">未設定</option>{% for v in ['ウクレレ','ギター'] %}<option value="{{v}}"{% if values.get('instrument')==v %} selected{% endif %}>{{v}}</option>{% endfor %}</select></div><div><label for="kind">形態</label><select id="kind" name="kind"><option value="">未設定</option>{% for v in ['弾き語り','ソロ弾き','メロ弾き','デュオ'] %}<option value="{{v}}"{% if values.get('kind')==v %} selected{% endif %}>{{v}}</option>{% endfor %}</select></div></div><label for="artist">アーティスト</label><input id="artist" name="artist" maxlength="120" value="{{values.get('artist','')}}"><label for="video">YouTube URL</label><input id="video" name="video" type="url" maxlength="500" value="{{values.get('video','')}}" placeholder="https://youtu.be/..."><div class="row"><div><label for="genre">ジャンル</label><input id="genre" name="genre" maxlength="80" value="{{values.get('genre','')}}"></div><div><label for="note">メモ</label><input id="note" name="note" maxlength="500" value="{{values.get('note','')}}"></div></div><div class="actions"><button type="submit">{{'変更を保存' if values.get('material_id') else '曲を追加する'}}</button>{% if values.get('material_id') %}<a class="button sub" href="/admin/songs">編集をやめる</a>{% endif %}<a class="button sub" href="/kanto/admin/carte">カルテを開く</a></div></form><h2 class="section-title">登録曲（{{materials|length}}曲）</h2><input id="songSearch" placeholder="曲名・アーティストで絞り込み" oninput="filterSongs()" style="max-width:420px;margin-bottom:10px"><table class="small-table" id="songTable"><tr><th>ID</th><th>曲</th><th>分類</th><th>公開</th><th>操作</th></tr>{% for item in materials %}<tr data-search="{{(item.title+' '+item.artist)|lower}}"><td>{{item.id}}</td><td><b>{{item.title}}</b>{% if item.artist %}<br><span class="muted">{{item.artist}}</span>{% endif %}</td><td>{{item.instrument}} {{item.kind}}{% if item.genre %}<br><span class="muted">{{item.genre}}</span>{% endif %}</td><td><span class="pill {{'on' if item.active else 'off'}}">{{'公開' if item.active else '非公開'}}</span></td><td><a class="button sub" href="/admin/songs?edit_id={{item.id}}">編集</a> <form class="inline" method="post" action="/admin/songs/visibility" onsubmit="return confirm('{{item.title}}を{{'非公開' if item.active else '再公開'}}にしますか？')"><input type="hidden" name="material_id" value="{{item.id}}"><input type="hidden" name="action" value="{{'archive' if item.active else 'publish'}}"><button class="{{'danger' if item.active else ''}}">{{'非公開' if item.active else '再公開'}}</button></form></td></tr>{% endfor %}</table><script>function filterSongs(){let q=songSearch.value.toLowerCase();songTable.querySelectorAll('tr[data-search]').forEach(r=>r.hidden=!r.dataset.search.includes(q))}</script></main></body></html>"""
 
-MAINTENANCE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>状態確認・バックアップ</title><style>{{style}}</style></head><body><header><h1>状態確認・バックアップ</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<table class="status"><tr><th>項目</th><th>状態</th><th>詳細</th></tr><tr><td>データ保存</td><td class="{{'ok' if status.storage.ok else 'bad'}}">{{'正常' if status.storage.ok else 'エラー'}}</td><td>{{status.storage.backend}} {{status.storage.error}}</td></tr><tr><td>曲リスト</td><td class="{{'ok' if status.sheet.ok else 'bad'}}">{{'正常' if status.sheet.ok else 'エラー'}}</td><td>{{status.sheet.count}}曲 {{status.sheet.error}}</td></tr>{% for name,t in status.tenants.items() %}<tr><td>{{'関西' if name=='kansai' else '関東'}} LINE</td><td class="{{'ok' if t.line_configured else 'bad'}}">{{'設定済み' if t.line_configured else '未設定'}}</td><td>日程: {{'ON' if t.schedule_enabled else 'OFF'}} / カルテ: {{'ON' if t.carte_enabled else 'OFF'}}</td></tr>{% endfor %}<tr><td>起動維持</td><td class="{{'ok' if status.keepalive.get('enabled') else 'bad'}}">{{'ON' if status.keepalive.get('enabled') else 'OFF'}}</td><td>{% if not status.keepalive.get('configured') %}cron-job.org未設定{% elif status.keepalive.get('error') %}{{status.keepalive.get('error')}}{% else %}自動停止: {{status.keepalive.get('expires_at') or 'なし'}}{% endif %}</td></tr><tr><td>バックアップ</td><td>{{status.backup.count}}世代</td><td>最新: {{status.backup.latest_at or 'まだありません'}}</td></tr></table><div class="actions"><form method="post" action="/admin/maintenance/backup"><button>今すぐバックアップ</button></form><a class="button sub" href="/admin/maintenance/backup.json">現在のデータをダウンロード</a>{% if status.keepalive.get('configured') %}<form method="post" action="/admin/maintenance/keepalive"><input type="hidden" name="action" value="on"><button class="sub">起動維持を常時ON</button></form><form method="post" action="/admin/maintenance/keepalive"><input type="hidden" name="action" value="off"><button class="sub">起動維持をOFF</button></form>{% endif %}</div><p class="muted" style="margin-top:16px">バックアップはUpstash内に最大14世代保存します。ダウンロードしたJSONは別の場所にも保管できます。</p></main></body></html>"""
+MAINTENANCE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>状態確認・バックアップ</title><style>{{style}}</style></head><body><header><h1>状態確認・バックアップ</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<table class="status"><tr><th>項目</th><th>状態</th><th>詳細</th></tr><tr><td>データ保存</td><td class="{{'ok' if status.storage.ok else 'bad'}}">{{'正常' if status.storage.ok else 'エラー'}}</td><td>{{status.storage.backend}} {{status.storage.error}}</td></tr><tr><td>曲リスト</td><td class="{{'ok' if status.sheet.ok else 'bad'}}">{{'正常' if status.sheet.ok else 'エラー'}}</td><td>{{status.sheet.count}}曲 {{status.sheet.error}}</td></tr>{% for name,t in status.tenants.items() %}<tr><td>{{'関西' if name=='kansai' else '関東'}} LINE</td><td class="{{'ok' if t.line_configured else 'bad'}}">{{'設定済み' if t.line_configured else '未設定'}}</td><td>日程: {{'ON' if t.schedule_enabled else 'OFF'}} / カルテ: {{'ON' if t.carte_enabled else 'OFF'}}</td></tr>{% endfor %}<tr><td>起動維持</td><td class="{{'ok' if status.keepalive.get('enabled') else 'bad'}}">{{'ON' if status.keepalive.get('enabled') else 'OFF'}}</td><td>{% if not status.keepalive.get('configured') %}cron-job.org未設定{% elif status.keepalive.get('error') %}{{status.keepalive.get('error')}}{% else %}自動停止: {{status.keepalive.get('expires_at') or 'なし'}}{% endif %}</td></tr><tr><td>バックアップ</td><td>{{status.backup.count}}世代</td><td>最新: {{status.backup.latest_at or 'まだありません'}}</td></tr></table><div class="actions"><form method="post" action="/admin/maintenance/backup"><button>今すぐバックアップ</button></form><a class="button sub" href="/admin/maintenance/backup.json">現在のデータをダウンロード</a>{% if status.keepalive.get('configured') %}<form method="post" action="/admin/maintenance/keepalive"><input type="hidden" name="action" value="on"><button class="sub">起動維持を常時ON</button></form><form method="post" action="/admin/maintenance/keepalive"><input type="hidden" name="action" value="off"><button class="sub">起動維持をOFF</button></form>{% endif %}</div><h2 class="section-title">保存済みバックアップから復元</h2><div class="warning">復元の直前に現在データを自動保存します。誤って復元しても、その自動保存から戻せます。</div><div class="card">{% if snapshots %}{% for item in snapshots|reverse %}<div class="restore"><b>{{item.created_at}}</b><p class="muted">関西 {{item.kansai_members}}人 / 関東 {{item.kanto_members}}人 / カルテ記録 {{item.carte_progress}}件</p><a class="button sub" href="/admin/maintenance/restore/{{item.index}}">内容を確認して復元</a></div>{% endfor %}{% else %}<p class="muted">バックアップはまだありません。</p>{% endif %}</div></main></body></html>"""
+
+RESTORE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>バックアップ復元</title><style>{{style}}</style></head><body><header><h1>バックアップ復元</h1><a href="/admin/maintenance">戻る</a></header><main><div class="warning"><b>{{snapshot.created_at}}</b> の状態へ戻します。現在の状態は実行直前に自動保存されます。</div><div class="card"><p>関西メンバー {{snapshot.kansai_members}}人<br>関東メンバー {{snapshot.kanto_members}}人<br>カルテ記録 {{snapshot.carte_progress}}件</p><form method="post"><button class="danger" onclick="return confirm('このバックアップへ復元しますか？')">この状態へ復元する</button> <a class="button sub" href="/admin/maintenance">キャンセル</a></form></div></main></body></html>"""
+
+REMINDERS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{label}} リマインド</title><style>{{style}}</style></head><body><header><h1>{{label}} リマインド</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<p class="muted">対象者と本文を確認してから送信します。ボタンを押すまでLINEは送られません。</p>{% for preview in previews %}<section class="card" style="margin-top:14px"><h2>{{preview.label}}（{{preview.targets|length}}人）</h2>{% if preview.targets %}{% for target in preview.targets %}<div class="target"><b>{{target.display_name or '名前未登録'}}</b><pre>{{target.text}}</pre></div>{% endfor %}<form method="post" action="/admin/reminders/{{tenant}}/{{preview.kind}}" onsubmit="return confirm('{{preview.targets|length}}人に送信しますか？')"><button>{{preview.targets|length}}人にLINE送信</button></form>{% else %}<p class="muted">現在、送信対象はいません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
 
 
 def create_admin_portal_blueprint():
@@ -65,7 +73,11 @@ def create_admin_portal_blueprint():
     def home():
         if not teacher_session_ok():
             return redirect("/admin/login")
-        return render_template_string(HOME_HTML, style=BASE_STYLE)
+        from lesson_operations import dashboard_data
+
+        return render_template_string(
+            HOME_HTML, style=BASE_STYLE, dashboard=dashboard_data()
+        )
 
     @bp.route("/admin/login", methods=["GET", "POST"])
     def login():
@@ -94,36 +106,120 @@ def create_admin_portal_blueprint():
     @bp.route("/admin/songs", methods=["GET", "POST"])
     @teacher_only
     def songs():
-        from carte import add_material
+        from carte import (
+            add_material,
+            get_request,
+            load_materials,
+            mark_request_added,
+            update_material,
+        )
 
         values = dict(request.form) if request.method == "POST" else {}
         error = ""
         notice = request.args.get("notice", "")
+        request_item = None
         if request.method == "POST":
-            item, source, error = add_material(values)
+            material_id = str(values.get("material_id", "")).strip()
+            if material_id.isdigit():
+                item, error = update_material(int(material_id), values, "update")
+                source = item.get("source", "") if item else ""
+            else:
+                item, source, error = add_material(values)
             if not error:
-                label = "Google Sheetとカルテ" if source == "sheet" else "共通カルテ"
-                return _notice_redirect(
-                    "/admin/songs", f"{item['id']}:{label}に追加しました"
+                request_id = str(values.get("request_id", "")).strip()
+                if request_id:
+                    mark_request_added(request_id, item["id"])
+                label = "変更を保存" if material_id else (
+                    "Google Sheetとカルテに追加" if source == "sheet" else "共通カルテに追加"
                 )
+                return _notice_redirect(
+                    "/admin/songs", f"ID {item['id']}：{label}しました"
+                )
+        else:
+            edit_id = str(request.args.get("edit_id", "")).strip()
+            request_id = str(request.args.get("request_id", "")).strip()
+            try:
+                materials = load_materials(force=True, include_inactive=True)
+            except TypeError:  # keeps simple test doubles and older adapters compatible
+                materials = load_materials(force=True)
+            if edit_id.isdigit():
+                item = next((row for row in materials if row.get("id") == int(edit_id)), None)
+                if item:
+                    values = {key: item.get(key, "") for key in (
+                        "title", "instrument", "kind", "artist", "video", "note", "genre"
+                    )}
+                    values["material_id"] = str(item["id"])
+                else:
+                    error = "編集する曲が見つかりません。"
+            elif request_id:
+                request_item = get_request(request_id)
+                if request_item:
+                    values = {
+                        "title": request_item.get("title", ""),
+                        "artist": request_item.get("artist", ""),
+                        "instrument": request_item.get("instrument", ""),
+                        "note": request_item.get("comment", ""),
+                        "request_id": request_id,
+                    }
+                else:
+                    error = "リクエストが見つかりません。"
+        try:
+            materials = load_materials(
+                force=bool(request.method == "POST"), include_inactive=True
+            )
+        except TypeError:  # keeps simple test doubles and older adapters compatible
+            materials = load_materials(force=bool(request.method == "POST"))
+        materials = [
+            {
+                "id": row.get("id", ""),
+                "title": row.get("title", ""),
+                "artist": row.get("artist", ""),
+                "instrument": row.get("instrument", ""),
+                "kind": row.get("kind", ""),
+                "genre": row.get("genre", ""),
+                "active": row.get("active", True),
+                **row,
+            }
+            for row in materials
+            if isinstance(row, dict)
+        ]
         return render_template_string(
             SONGS_HTML,
             style=BASE_STYLE,
             values=values,
             error=error,
             notice=notice,
+            materials=materials,
+            request_item=request_item,
             sheet_writer=bool(os.environ.get("REPERTOIRE_SHEET_WRITE_URL", "").strip()),
         ), (400 if error else 200)
+
+    @bp.post("/admin/songs/visibility")
+    @teacher_only
+    def song_visibility():
+        from carte import update_material
+
+        try:
+            material_id = int(request.form.get("material_id", ""))
+        except (TypeError, ValueError):
+            abort(400)
+        action = str(request.form.get("action", ""))
+        item, error = update_material(material_id, action=action)
+        if error:
+            return _notice_redirect("/admin/songs", error)
+        verb = "非公開にしました" if action == "archive" else "再公開しました"
+        return _notice_redirect("/admin/songs", f"ID {item['id']}：{verb}")
 
     @bp.get("/admin/maintenance")
     @teacher_only
     def maintenance_page():
-        from maintenance import system_status
+        from maintenance import list_snapshots, system_status
 
         return render_template_string(
             MAINTENANCE_HTML,
             style=BASE_STYLE,
             status=system_status(),
+            snapshots=list_snapshots(),
             notice=request.args.get("notice", ""),
         )
 
@@ -149,6 +245,64 @@ def create_admin_portal_blueprint():
         response.headers["Content-Disposition"] = "attachment; filename=lesson-backup.json"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    @bp.route("/admin/maintenance/restore/<int:index>", methods=["GET", "POST"])
+    @teacher_only
+    def restore_backup(index):
+        from maintenance import list_snapshots, restore_snapshot
+
+        snapshot = next((row for row in list_snapshots() if row["index"] == index), None)
+        if not snapshot:
+            abort(404)
+        if request.method == "POST":
+            try:
+                result = restore_snapshot(index)
+            except ValueError as exc:
+                return _notice_redirect("/admin/maintenance", str(exc))
+            return _notice_redirect(
+                "/admin/maintenance",
+                f"{result['restored_at']} の状態へ復元しました。復元直前の状態も保存済みです。",
+            )
+        return render_template_string(
+            RESTORE_HTML, style=BASE_STYLE, snapshot=snapshot
+        )
+
+    @bp.get("/admin/reminders/<tenant>")
+    @teacher_only
+    def reminders(tenant):
+        from lesson_operations import TENANT_LABELS, reminder_preview
+
+        if tenant not in TENANT_LABELS:
+            abort(404)
+        return render_template_string(
+            REMINDERS_HTML,
+            style=BASE_STYLE,
+            tenant=tenant,
+            label=TENANT_LABELS[tenant],
+            previews=[
+                reminder_preview(tenant, "unanswered"),
+                reminder_preview(tenant, "tomorrow"),
+            ],
+            notice=request.args.get("notice", ""),
+        )
+
+    @bp.post("/admin/reminders/<tenant>/<kind>")
+    @teacher_only
+    def send_reminder(tenant, kind):
+        from app import push_text_message
+        from lesson_operations import TENANT_LABELS, send_reminders
+
+        if tenant not in TENANT_LABELS or kind not in {"unanswered", "tomorrow"}:
+            abort(404)
+        result = send_reminders(tenant, kind, push_text_message)
+        if not result["ok"]:
+            message = f"{result['count']}人まで送信しました。{result['error']} 再送前にLINE履歴を確認してください。"
+        else:
+            message = f"{result['label']}を{result['count']}人へ送信しました。"
+        return _notice_redirect(
+            f"/admin/reminders/{tenant}",
+            message,
+        )
 
     @bp.post("/admin/maintenance/keepalive")
     @teacher_only

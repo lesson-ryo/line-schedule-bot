@@ -20,6 +20,11 @@ SCHEDULE_KEYS = (
     "groups",
     "assignment",
     "reset_backup",
+    "deadline",
+    "comment_label",
+    "notify_message",
+    "reminders",
+    "schedule_targets",
 )
 CARTE_KEYS = (
     "carte:progress",
@@ -29,8 +34,20 @@ CARTE_KEYS = (
     "carte:requests",
     "carte:custom_materials",
     "carte:notifications",
+    "carte:material_history",
 )
 MAX_SNAPSHOTS = 14
+
+DICT_KEYS = {"quotas", "groups", "reset_backup", "carte:prefs"}
+TEXT_KEYS = {"deadline", "comment_label", "notify_message"}
+
+
+def _default_for(key: str):
+    if key in DICT_KEYS:
+        return {}
+    if key in TEXT_KEYS:
+        return ""
+    return []
 
 
 def _with_tenant(name: str, callback):
@@ -47,13 +64,13 @@ def build_snapshot() -> dict:
     for tenant in ("kansai", "kanto"):
         schedules[tenant] = _with_tenant(
             tenant,
-            lambda: {key: load_json(key, default=[]) for key in SCHEDULE_KEYS},
+            lambda: {key: load_json(key, default=_default_for(key)) for key in SCHEDULE_KEYS},
         )
 
     # carte:* keys always resolve to the shared carte namespace.
     carte = _with_tenant(
         "kanto",
-        lambda: {key: load_json(key, default=[]) for key in CARTE_KEYS},
+        lambda: {key: load_json(key, default=_default_for(key)) for key in CARTE_KEYS},
     )
     return {
         "version": 1,
@@ -88,6 +105,72 @@ def backup_info() -> dict:
     return {
         "count": len(snapshots),
         "latest_at": latest.get("created_at", "") if isinstance(latest, dict) else "",
+    }
+
+
+def list_snapshots() -> list[dict]:
+    snapshots = _with_tenant(
+        "kanto", lambda: load_json("carte:backups", default=[])
+    )
+    if not isinstance(snapshots, list):
+        return []
+    out = []
+    for index, snapshot in enumerate(snapshots):
+        if not isinstance(snapshot, dict):
+            continue
+        schedules = snapshot.get("schedules") or {}
+        carte = snapshot.get("carte") or {}
+        out.append(
+            {
+                "index": index,
+                "created_at": snapshot.get("created_at", ""),
+                "kansai_members": len((schedules.get("kansai") or {}).get("members") or []),
+                "kanto_members": len((schedules.get("kanto") or {}).get("members") or []),
+                "carte_progress": len(carte.get("carte:progress") or []),
+            }
+        )
+    return out
+
+
+def restore_snapshot(index: int) -> dict:
+    """Restore one stored generation after saving the current state as a safety copy."""
+    snapshots = _with_tenant(
+        "kanto", lambda: load_json("carte:backups", default=[])
+    )
+    if not isinstance(snapshots, list) or index < 0 or index >= len(snapshots):
+        raise ValueError("復元するバックアップが見つかりません。")
+    snapshot = snapshots[index]
+    if (
+        not isinstance(snapshot, dict)
+        or snapshot.get("version") != 1
+        or not isinstance(snapshot.get("schedules"), dict)
+        or not isinstance(snapshot.get("carte"), dict)
+    ):
+        raise ValueError("バックアップの形式が正しくありません。")
+
+    safety = save_snapshot()
+    schedules = snapshot["schedules"]
+    for tenant in ("kansai", "kanto"):
+        data = schedules.get(tenant)
+        if not isinstance(data, dict):
+            raise ValueError(f"{tenant}の日程データが見つかりません。")
+
+        def restore_schedule():
+            for key in SCHEDULE_KEYS:
+                save_json(key, data.get(key, _default_for(key)))
+
+        _with_tenant(tenant, restore_schedule)
+
+    carte = snapshot["carte"]
+
+    def restore_carte():
+        for key in CARTE_KEYS:
+            save_json(key, carte.get(key, _default_for(key)))
+
+    _with_tenant("kanto", restore_carte)
+    return {
+        "restored_at": snapshot.get("created_at", ""),
+        "safety_at": safety.get("created_at", ""),
     }
 
 

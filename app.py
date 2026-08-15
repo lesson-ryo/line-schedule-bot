@@ -817,6 +817,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div id="result"></div>
   <div class="links" style="margin-top:14px">
     <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
+    <a href="../../../admin/reminders/__TENANT__">未回答・前日リマインド</a>
     <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
     <a href="#" onclick="go('reset');return false;">回答をリセットする</a>
     <a href="#" onclick="go('keepalive');return false;">起動維持の状態</a>
@@ -1183,7 +1184,10 @@ def admin_keepalive():
 def admin_panel():
     """管理者用の入力フォーム。日付と時間帯を選ぶだけで候補リストを組み立てて送信できる。"""
     check_admin_token()
-    return ADMIN_PANEL_HTML.replace("__PANEL_NAME__", str(PANEL_NAME))
+    return (
+        ADMIN_PANEL_HTML.replace("__PANEL_NAME__", str(PANEL_NAME))
+        .replace("__TENANT__", get_tenant().name)
+    )
 
 
 @app.route("/admin/members.json", methods=["GET"])
@@ -1229,6 +1233,19 @@ def admin_assign():
     votes = load_json("votes")
     locations = {l["user_id"]: l["location"] for l in load_json("locations")}
     result = assign_mod.auto_assign(candidates, votes, quotas, locations, groups)
+
+    # 同じ講師が関西・関東で同時刻に入らないよう、地域をまたいで検算する。
+    from lesson_operations import cross_tenant_conflicts
+
+    conflicts = cross_tenant_conflicts(get_tenant().name, result.get("schedule", []))
+    if conflicts:
+        panel = admin_link("panel")
+        detail = "\n".join(f"・{line}" for line in conflicts)
+        return (
+            f"<pre>地域をまたぐ日程重複があるため保存しませんでした。\n\n{detail}</pre>"
+            f'<p><a href="{panel}">管理画面に戻る</a></p>',
+            409,
+        )
 
     # 通知で使えるように結果を保存しておく
     save_json("assignment", result.get("schedule", []))
@@ -1421,6 +1438,11 @@ def admin_schedule_save():
         slot["manual"] = True
         updated.append(slot)
 
+    from lesson_operations import cross_tenant_conflicts
+
+    conflicts = cross_tenant_conflicts(get_tenant().name, updated)
+    if conflicts:
+        return {"error": "地域をまたぐ日程重複があります。 " + " ".join(conflicts)}, 409
     save_json("assignment", updated)
     return {"schedule": updated, "names": sorted(directory.keys())}
 

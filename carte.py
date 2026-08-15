@@ -41,24 +41,26 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def load_materials(force=False):
-    """シートを教材マスターへ変換。空の予約行は公開しない。"""
+def load_materials(force=False, include_inactive=False):
+    """シートを教材マスターへ変換。空行と非公開曲は生徒側へ出さない。"""
     if not force and _material_cache["items"] and time.time() - _material_cache["at"] < 300:
-        return _material_cache["items"]
+        items = _material_cache["items"]
+        return items if include_inactive else [item for item in items if item.get("active", True)]
     res = requests.get(SHEET_CSV_URL, timeout=15)
     res.raise_for_status()
     rows = csv.reader(io.StringIO(res.content.decode("utf-8-sig")))
     next(rows, None)
     items = []
     for row in rows:
-        # シート列: A=ID B=楽器 C=形態 D=曲名 E=アーティスト F=Youtube G=メモ H=ジャンル
-        # H列はまだシートに無くてもよい（無ければ空文字になる）。列を増やしたらここも直す。
-        row += [""] * (8 - len(row))
-        material_id, instrument, kind, title, artist, video, note, genre = [
-            v.strip() for v in row[:8]
+        # シート列: A=ID B=楽器 C=形態 D=曲名 E=アーティスト F=Youtube G=メモ H=ジャンル I=公開状態
+        # I列が空の既存曲は公開扱い。IDは過去カルテとの紐付けなので削除・採番し直しはしない。
+        row += [""] * (9 - len(row))
+        material_id, instrument, kind, title, artist, video, note, genre, visibility = [
+            v.strip() for v in row[:9]
         ]
         if not material_id.isdigit() or not title:
             continue
+        active = _normalized_title(visibility) not in {"非公開", "inactive", "archived", "false", "0"}
         items.append(
             {
                 "id": int(material_id),
@@ -69,6 +71,8 @@ def load_materials(force=False):
                 "video": video,
                 "note": note,
                 "genre": genre,
+                "active": active,
+                "source": "sheet",
             }
         )
     custom = load_json("carte:custom_materials", default=[])
@@ -91,13 +95,14 @@ def load_materials(force=False):
                     "video": str(item.get("video", "")).strip(),
                     "note": str(item.get("note", "")).strip(),
                     "genre": str(item.get("genre", "")).strip(),
+                    "active": bool(item.get("active", True)),
                     "source": "custom",
                 }
             )
             known_ids.add(material_id)
     items.sort(key=lambda x: x["id"], reverse=True)
     _material_cache.update(at=time.time(), items=items)
-    return items
+    return items if include_inactive else [item for item in items if item.get("active", True)]
 
 
 def _normalized_title(value: str) -> str:
@@ -162,6 +167,7 @@ def add_material(values: dict) -> tuple[dict | None, str, str]:
             return None, "", f"同じ動画URLがすでにあります（ID {item['id']}）。"
 
     payload = {
+        "action": "add",
         "title": title,
         "instrument": instrument,
         "kind": kind,
@@ -169,6 +175,7 @@ def add_material(values: dict) -> tuple[dict | None, str, str]:
         "video": video,
         "note": note,
         "genre": genre,
+        "active": True,
     }
     write_url = os.environ.get("REPERTOIRE_SHEET_WRITE_URL", "").strip()
     if write_url:
@@ -182,6 +189,8 @@ def add_material(values: dict) -> tuple[dict | None, str, str]:
             _material_cache.update(at=0.0, items=[])
             item = dict(payload, id=int(result["id"]), source="sheet")
             item.pop("secret", None)
+            item.pop("action", None)
+            _record_material_history(item["id"], "add", {}, item)
             return item, "sheet", ""
         except Exception as exc:
             return None, "", f"Google Sheetへの追加に失敗しました: {str(exc)[:240]}"
@@ -194,10 +203,123 @@ def add_material(values: dict) -> tuple[dict | None, str, str]:
         + [int(item.get("id", 0)) for item in custom if str(item.get("id", "")).isdigit()]
     ) + 1
     item = dict(payload, id=material_id, source="custom", created_at=_now())
+    item.pop("action", None)
     custom.append(item)
     save_json("carte:custom_materials", custom[-2000:])
     _material_cache.update(at=0.0, items=[])
+    _record_material_history(item["id"], "add", {}, item)
     return item, "custom", ""
+
+
+def _record_material_history(material_id: int, action: str, before: dict, after: dict):
+    rows = load_json("carte:material_history", default=[])
+    if not isinstance(rows, list):
+        rows = []
+    rows.append(
+        {
+            "material_id": material_id,
+            "action": action,
+            "before": {k: before.get(k) for k in ("title", "artist", "instrument", "kind", "video", "note", "genre", "active")},
+            "after": {k: after.get(k) for k in ("title", "artist", "instrument", "kind", "video", "note", "genre", "active")},
+            "timestamp": _now(),
+        }
+    )
+    save_json("carte:material_history", rows[-5000:])
+
+
+def update_material(material_id: int, values: dict | None = None, action: str = "update") -> tuple[dict | None, str]:
+    """Edit, archive, or republish a song without ever changing its stable ID."""
+    values = values or {}
+    materials = load_materials(force=True, include_inactive=True)
+    current = next((item for item in materials if item.get("id") == material_id), None)
+    if not current:
+        return None, "曲が見つかりません。"
+    if action not in {"update", "archive", "publish"}:
+        return None, "操作が正しくありません。"
+
+    updated = dict(current)
+    if action == "update":
+        title = str(values.get("title", "")).strip()[:120]
+        if not title:
+            return None, "曲名を入力してください。"
+        instrument = str(values.get("instrument", "")).strip()
+        kind = str(values.get("kind", "")).strip()
+        if instrument not in {"", "ウクレレ", "ギター"}:
+            return None, "楽器が正しくありません。"
+        if kind not in {"", "弾き語り", "ソロ弾き", "メロ弾き", "デュオ"}:
+            return None, "形態が正しくありません。"
+        video = str(values.get("video", "")).strip()[:500]
+        video_id = ""
+        if video:
+            video_id = _youtube_video_id(video)
+            if not video_id:
+                return None, "YouTube動画のURLを入力してください。"
+        normalized = _normalized_title(title)
+        for item in materials:
+            if item.get("id") == material_id:
+                continue
+            if _normalized_title(item.get("title", "")) == normalized:
+                return None, f"同じ曲名がすでにあります（ID {item['id']}）。"
+            existing_video = str(item.get("video", "")).strip()
+            if video and (existing_video == video or (video_id and _youtube_video_id(existing_video) == video_id)):
+                return None, f"同じ動画URLがすでにあります（ID {item['id']}）。"
+        updated.update(
+            title=title,
+            instrument=instrument,
+            kind=kind,
+            artist=str(values.get("artist", "")).strip()[:120],
+            video=video,
+            note=str(values.get("note", "")).strip()[:500],
+            genre=str(values.get("genre", "")).strip()[:80],
+        )
+    else:
+        updated["active"] = action == "publish"
+
+    write_url = os.environ.get("REPERTOIRE_SHEET_WRITE_URL", "").strip()
+    if current.get("source") == "sheet":
+        if not write_url:
+            return None, "Google Sheet書き込み連携が設定されていないため変更できません。"
+        payload = {
+            "secret": os.environ.get("REPERTOIRE_SHEET_WRITE_SECRET", ""),
+            "action": action,
+            "id": material_id,
+            **{key: updated.get(key, "") for key in ("title", "instrument", "kind", "artist", "video", "note", "genre")},
+        }
+        try:
+            response = requests.post(write_url, json=payload, timeout=20)
+            response.raise_for_status()
+            result = response.json()
+            if not result.get("ok"):
+                raise RuntimeError(result.get("error") or "Google Sheetの更新に失敗しました。")
+        except Exception as exc:
+            return None, f"Google Sheetの更新に失敗しました: {str(exc)[:240]}"
+    else:
+        custom = load_json("carte:custom_materials", default=[])
+        if not isinstance(custom, list):
+            custom = []
+        row = next((item for item in custom if int(item.get("id", 0) or 0) == material_id), None)
+        if not row:
+            return None, "曲が見つかりません。"
+        row.update({key: updated.get(key) for key in ("title", "instrument", "kind", "artist", "video", "note", "genre", "active")})
+        row["updated_at"] = _now()
+        save_json("carte:custom_materials", custom)
+
+    _material_cache.update(at=0.0, items=[])
+    _record_material_history(material_id, action, current, updated)
+    return updated, ""
+
+
+def get_request(request_id: str) -> dict | None:
+    return next((row for row in _requests() if str(row.get("id")) == str(request_id)), None)
+
+
+def mark_request_added(request_id: str, material_id: int) -> None:
+    rows = _requests()
+    row = next((item for item in rows if str(item.get("id")) == str(request_id)), None)
+    if not row:
+        return
+    row.update(status="added", material_id=material_id, added_at=_now())
+    save_json("carte:requests", rows)
 
 
 def next_lesson_groups() -> list[dict]:
@@ -433,7 +555,7 @@ def _upsert_progress(user_id, display_name, material_id, changes, actor):
 
 STUDENT_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>マイカルテ</title>
-<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script><style>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script><style>.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 9px}.summary button{border:1px solid #dfe3e6;border-radius:8px;background:#f8faf9;padding:7px 3px;color:#465059;font-size:10px}.summary button b{display:block;color:#202428;font-size:16px;margin-bottom:1px}.summary button.on{border-color:#087f5b;background:#eaf7f0;color:#0f6e56}</style><style>
 :root{--green:#087f5b;--amber:#a06a00;--line:#dfe3e6;--muted:#687078}*{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#202428;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}.head{position:sticky;top:0;z-index:5;background:#fff;padding:13px 12px;border-bottom:1px solid var(--line)}h1{font-size:19px;margin:0 0 10px}.tools{display:flex;gap:7px}.tools input{min-width:0;flex:1;height:41px;border:1px solid #bec5c9;border-radius:8px;padding:0 10px;font-size:15px}.tools select{width:110px;border:1px solid #bec5c9;border-radius:8px;background:#fff;padding:0 5px}.tools .req{flex:0 0 auto;height:41px;border:1px solid var(--green);border-radius:8px;background:#fff;color:var(--green);font-size:13px;font-weight:700;padding:0 12px}.reqrow{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #eef0f1}.reqrow:last-child{border-bottom:0}.reqname{flex:1;min-width:0}.reqname b{display:block;font-size:14px}.reqname span{display:block;color:var(--muted);font-size:10px;margin-top:2px}.metoo{flex:0 0 auto;height:34px;border:1px solid #bec5c9;border-radius:17px;background:#fff;font-size:12px;padding:0 13px}.metoo.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:700}.added{flex:0 0 auto;font-size:10px;color:var(--green);font-weight:700}.count{font-size:11px;color:var(--muted);margin-top:7px}.sheet{margin:10px;background:#fff;border:1px solid var(--line);border-radius:9px;overflow:hidden}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#f8faf9;font-size:12px;text-align:left;padding:9px;border-bottom:1px solid var(--line)}th:last-child{text-align:center;width:58%}td{border-bottom:1px solid var(--line);padding:10px 9px}.song{min-width:0}.song .t{line-height:1.35}.song b{font-size:14px}.song em{font-style:normal;color:var(--muted);font-size:11px;margin-left:6px}.song span.meta{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}.tag{display:inline-block;font-size:9px;padding:2px 7px;border-radius:9px;margin-right:3px}.tag.uk{background:#e6f1fb;color:#0c447c}.tag.gt{background:#faece7;color:#712b13}.tag.kind{background:#f1efe8;color:#444441}.tag.genre{background:#eeedfe;color:#3c3489}.tag.pop{background:#fdf0e6;color:#993c1d}.vid{display:inline-block;font-size:9px;padding:2px 8px;border-radius:9px;margin-right:3px;background:#fdeaea;color:#a32d2d;font-weight:700;text-decoration:none}.nextmark{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:#fff3d6;color:#854f0b;margin-top:3px}.groupsel{width:100%;height:44px;border:1px solid var(--green);border-radius:9px;background:#fff;color:#0f6e56;font-size:15px;font-weight:700;padding:0 10px;margin:0 0 10px}.cell{text-align:left;border-left:1px solid var(--line);cursor:pointer}.cell:active{background:#eaf7f0}.cell-content{display:flex;align-items:center;gap:8px;min-width:0}.status-block{flex:0 0 72px;text-align:center}.done{display:block;color:var(--green);font-weight:700;font-size:12px}.wanted{display:block;color:var(--amber);font-weight:700;font-size:12px}.notdone{display:block;color:#8a9298;font-size:12px}.lesson-date{display:block;color:#596168;font-size:10px;margin-top:3px}.memo-preview{flex:1;min-width:0;color:#5f4a12;background:#fff8dc;border-radius:5px;padding:5px 6px;font-size:10px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:50px 10px}dialog{border:0;border-radius:12px;padding:0;width:calc(100% - 28px);max-width:390px;box-shadow:0 18px 60px rgba(0,0,0,.25)}dialog::backdrop{background:rgba(20,30,26,.42)}.modal{padding:22px}.modal h2{font-size:18px;margin:0 0 18px}.choice{display:flex;gap:6px;margin-bottom:16px}.choice label{flex:1;border:1px solid var(--line);border-radius:8px;padding:12px 3px;text-align:center;font-size:12px}.field{margin-top:14px}.field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px}.field input,.field textarea{width:100%;border:1px solid #bec5c9;border-radius:7px;padding:10px;font-size:16px}.field input{height:44px}.field textarea{resize:vertical;min-height:88px}.actions{display:flex;gap:8px;margin-top:20px}.actions button{flex:1;height:43px;border-radius:7px;border:1px solid #bec5c9;background:#fff}.actions .save{background:var(--green);border-color:var(--green);color:#fff;font-weight:700}.video-dialog{max-width:760px;background:#111;color:#fff}.video-modal{padding:12px}.video-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.video-head button{border:1px solid #555;border-radius:7px;background:#222;color:#fff;padding:7px 12px}.video-frame{position:relative;width:100%;padding-top:56.25%;background:#000}.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.video-fallback{display:block;color:#fff;text-align:center;font-size:12px;margin-top:12px}.notice{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#183d31;color:#fff;padding:9px 16px;border-radius:7px;display:none;white-space:nowrap}
 </style></head><body><div class="head"><h1 id="heading">マイカルテ</h1><select class="groupsel" id="groupSel"></select><div class="tools"><input id="q" placeholder="曲名・アーティストを検索"><select id="filter"><option value="all">すべて</option><option value="done">実施済み</option><option value="wanted">やりたい</option><option value="notdone">未実施</option><option value="next">次回レッスン</option><option value="popular">みんなのやりたい曲</option></select><button class="req" onclick="openRequests()">リクエスト</button></div><div class="count" id="count">読み込み中…</div></div><main class="sheet" id="sheet"><div class="empty">読み込み中…</div></main><dialog id="editor"><form class="modal" onsubmit="save(event)"><h2 id="editSong"></h2><div class="choice"><label><input type="radio" name="state" value="notdone"> 未実施</label><label><input type="radio" name="state" value="wanted"> ★ やりたい</label><label><input type="radio" name="state" value="done"> ✓ 実施済み</label></div><div class="field"><label for="lessonDate">授業日</label><input type="date" id="lessonDate"></div><div class="field"><label for="studentNote">自由メモ</label><textarea id="studentNote" maxlength="1000" placeholder="練習のポイントや気づいたことを自由に入力"></textarea></div><div class="actions"><button type="button" onclick="editor.close()">キャンセル</button><button class="save" id="saveButton">保存</button></div></form></dialog><dialog id="reqDialog"><div class="modal"><h2>リクエスト</h2><p style="color:#687078;font-size:12px;margin:-12px 0 16px">リストに無い曲をリクエストできます。名前は他の生徒には出ません。</p><form onsubmit="sendRequest(event)"><div class="field"><label for="reqTitle">曲名</label><input id="reqTitle" maxlength="120" placeholder="必須" required></div><div class="field"><label for="reqArtist">アーティスト</label><input id="reqArtist" maxlength="120" placeholder="わかれば"></div><div class="field"><label for="reqInstrument">楽器</label><select id="reqInstrument" style="width:100%;height:44px;border:1px solid #bec5c9;border-radius:7px;padding:0 10px;font-size:16px;background:#fff"><option value="">どちらでも</option><option value="ウクレレ">ウクレレ</option><option value="ギター">ギター</option></select></div><div class="field"><label for="reqComment">ひとこと</label><textarea id="reqComment" maxlength="300" placeholder="なぜやりたいか、どのバージョンかなど"></textarea></div><div class="actions"><button type="button" onclick="reqDialog.close()">閉じる</button><button class="save" id="reqButton">送信</button></div></form><div style="margin-top:22px"><h2 style="font-size:15px;margin:0 0 4px">みんなのリクエスト</h2><p style="color:#687078;font-size:11px;margin:0 0 8px">同じ曲をやりたければ「私も」を押してください</p><div id="reqList"></div></div></div></dialog><dialog id="videoDialog" class="video-dialog"><div class="video-modal"><div class="video-head"><strong>YouTube</strong><button type="button" onclick="closeVideo()">閉じる</button></div><div class="video-frame"><iframe id="videoFrame" title="YouTube動画" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><a id="videoFallback" class="video-fallback" target="_blank" rel="noopener">再生できない場合はYouTubeで開く</a></div></dialog><div class="notice" id="notice">保存しました</div><script>
 const LIFF_ID='__LIFF_ID__';let token='',materials=[],progress={},popular={},requests=[],editingId=null,group='';
@@ -473,9 +595,11 @@ function youtubeId(url){try{let u=new URL(url),h=u.hostname.toLowerCase().replac
 function videos(m){let us=videoUrls(m.video);return us.map((u,i)=>`<a class="vid" href="${esc(u)}" target="_blank" rel="noopener" data-video="${esc(u)}" onclick="playVideo(event,this.dataset.video)">▶ ${us.length>1?'動画'+(i+1):'動画'}</a>`).join('')}
 function playVideo(e,url){e.preventDefault();e.stopPropagation();let id=youtubeId(url);if(!id){if(window.liff&&liff.openWindow){liff.openWindow({url,external:true})}else{window.open(url,'_blank','noopener')}return}videoFrame.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?playsinline=1&rel=0';videoFallback.href=url;if(!videoDialog.open)videoDialog.showModal()}
 function closeVideo(){videoFrame.removeAttribute('src');if(videoDialog.open)videoDialog.close()}
+function chooseSummary(value){filter.value=value;draw()}
+function renderSummary(){if(!document.getElementById('summary')){let el=document.createElement('div');el.id='summary';el.className='summary';groupSel.insertAdjacentElement('afterend',el)}let done=0,wanted=0,next=0;for(let p of Object.values(progress)){if(isDone(p))done++;else if(p?.status==='wanted')wanted++;if(p?.next_lesson)next++}summary.innerHTML=[['done','実施済み',done],['wanted','やりたい',wanted],['next','次回',next]].map(x=>`<button type="button" class="${filter.value===x[0]?'on':''}" onclick="chooseSummary('${x[0]}')"><b>${x[2]}</b>${x[1]}</button>`).join('')}
 function draw(){let query=q.value.toLowerCase(),f=filter.value;let xs=materials.filter(m=>{let st=stateOf(progress[m.id]);if(!inGroup(m,group))return false;if(!(m.title+' '+m.artist+' '+m.kind+' '+m.instrument+' '+(m.genre||'')).toLowerCase().includes(query))return false;if(f==='all')return true;if(f==='next')return !!progress[m.id]?.next_lesson;if(f==='popular')return (popular[m.id]?.wanted||0)>0;return f===st});
  if(f==='popular')xs=xs.slice().sort((a,b)=>(popular[b.id]?.wanted||0)-(popular[a.id]?.wanted||0));
- count.textContent=xs.length+'曲';sheet.innerHTML=xs.length?`<table><thead><tr><th>曲名</th><th>授業・メモ</th></tr></thead><tbody>${xs.map(m=>{let p=progress[m.id],st=stateOf(p),d=lessonDate(p);return `<tr><td class="song"><div class="t"><b>${esc(m.title)}</b>${m.artist?`<em>${esc(m.artist)}</em>`:''}</div><span class="meta">${tags(m)}${videos(m)}</span></td><td class="cell" onclick="openEditor(${m.id})"><div class="cell-content"><div class="status-block"><span class="${st}">${stateLabel(st)}</span>${d?`<span class="lesson-date">${jaDate(d)}</span>`:''}${p?.next_lesson?'<span class="nextmark">▶ 次回</span>':''}</div>${p?.student_note?`<span class="memo-preview" title="${esc(p.student_note)}">${esc(p.student_note)}</span>`:''}</div></td></tr>`}).join('')}</tbody></table>`:'<div class="empty">該当する曲はありません</div>'}
+ renderSummary();count.textContent=xs.length+'曲';sheet.innerHTML=xs.length?`<table><thead><tr><th>曲名</th><th>授業・メモ</th></tr></thead><tbody>${xs.map(m=>{let p=progress[m.id],st=stateOf(p),d=lessonDate(p);return `<tr><td class="song"><div class="t"><b>${esc(m.title)}</b>${m.artist?`<em>${esc(m.artist)}</em>`:''}</div><span class="meta">${tags(m)}${videos(m)}</span></td><td class="cell" onclick="openEditor(${m.id})"><div class="cell-content"><div class="status-block"><span class="${st}">${stateLabel(st)}</span>${d?`<span class="lesson-date">${jaDate(d)}</span>`:''}${p?.next_lesson?'<span class="nextmark">▶ 次回</span>':''}</div>${p?.student_note?`<span class="memo-preview" title="${esc(p.student_note)}">${esc(p.student_note)}</span>`:''}</div></td></tr>`}).join('')}</tbody></table>`:'<div class="empty">該当する曲はありません</div>'}
 function drawRequests(){reqList.innerHTML=requests.length?requests.map(r=>`<div class="reqrow"><span class="reqname"><b>${esc(r.title)}</b><span>${esc([r.artist,r.instrument].filter(Boolean).join(' ／ '))||'&nbsp;'}</span></span>${r.status==='added'?'<span class="added">リストに追加済み</span>':`<button class="metoo${r.voted?' on':''}" onclick="vote('${esc(r.id)}')">${r.voted?'私も ✓':'私も'} ${r.votes}</button>`}</div>`).join(''):'<p class="empty" style="padding:20px 0">まだリクエストはありません</p>'}
 function openRequests(){drawRequests();reqDialog.showModal()}
 async function vote(id){try{let d=await api('/api/carte/request/vote',{id});requests=d.requests;drawRequests()}catch(e){alert(e.message)}}
@@ -560,7 +684,7 @@ REQUESTS_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><
 const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const jaTime=iso=>{if(!iso)return '';let d=new Date(iso);if(isNaN(d))return iso;let p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`};
 let items=[];
-function draw(){let f=filter.value,xs=items.filter(x=>f==='all'||(x.status||'open')===f);count.textContent=xs.length+'件';list.innerHTML=xs.length?`<table><thead><tr><th>曲</th><th>ひとこと</th><th>リクエスト</th><th>私も</th><th>状態</th><th></th></tr></thead><tbody>${xs.map(x=>`<tr><td class="song"><b>${esc(x.title)}</b>${x.artist?`<em>${esc(x.artist)}</em>`:''}${x.instrument?`<br><span class="tag ${x.instrument==='ウクレレ'?'uk':'gt'}">${esc(x.instrument)}</span>`:''}</td><td>${x.comment?`<span class="comment">${esc(x.comment)}</span>`:''}</td><td class="who">${esc(x.display_name||'名前未登録')}<br><span class="when">${esc(jaTime(x.created_at))}</span></td><td class="votes">${(x.votes||[]).length}人</td><td><select class="status" onchange="setStatus('${esc(x.id)}',this.value)"><option value="open"${(x.status||'open')==='open'?' selected':''}>未対応</option><option value="added"${x.status==='added'?' selected':''}>追加済み</option><option value="declined"${x.status==='declined'?' selected':''}>見送り</option></select></td><td><button class="del" onclick="remove('${esc(x.id)}','${esc(x.title)}')">削除</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty">該当するリクエストはありません</div>'}
+function draw(){let f=filter.value,xs=items.filter(x=>f==='all'||(x.status||'open')===f);count.textContent=xs.length+'件';list.innerHTML=xs.length?`<table><thead><tr><th>曲</th><th>ひとこと</th><th>リクエスト</th><th>私も</th><th>状態</th><th></th></tr></thead><tbody>${xs.map(x=>`<tr><td class="song"><b>${esc(x.title)}</b>${x.artist?`<em>${esc(x.artist)}</em>`:''}${x.instrument?`<br><span class="tag ${x.instrument==='ウクレレ'?'uk':'gt'}">${esc(x.instrument)}</span>`:''}</td><td>${x.comment?`<span class="comment">${esc(x.comment)}</span>`:''}</td><td class="who">${esc(x.display_name||'名前未登録')}<br><span class="when">${esc(jaTime(x.created_at))}</span></td><td class="votes">${(x.votes||[]).length}人</td><td><select class="status" onchange="setStatus('${esc(x.id)}',this.value)"><option value="open"${(x.status||'open')==='open'?' selected':''}>未対応</option><option value="added"${x.status==='added'?' selected':''}>追加済み</option><option value="declined"${x.status==='declined'?' selected':''}>見送り</option></select></td><td>${(x.status||'open')==='open'?`<a href="${new URL('admin/songs',location.origin+'/')}?request_id=${encodeURIComponent(x.id)}" style="display:inline-block;background:#087f5b;color:#fff;text-decoration:none;border-radius:6px;padding:8px 10px;font-size:12px;margin-right:5px">曲に登録</a>`:''}<button class="del" onclick="remove('${esc(x.id)}','${esc(x.title)}')">削除</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty">該当するリクエストはありません</div>'}
 function toast(t){notice.textContent=t;notice.style.display='block';setTimeout(()=>notice.style.display='none',2000)}
 async function send(body){let r=await fetch('/admin/carte/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw Error(d.error||'保存に失敗しました');await load()}
 async function setStatus(id,status){try{await send({id,status});toast('状態を変えました')}catch(e){alert(e.message)}}
@@ -657,7 +781,25 @@ def create_carte_blueprint(
         title = str(body.get("title") or "").strip()[:120]
         if not title:
             return {"error": "曲名を入力してください。"}, 400
+        normalized = _normalized_title(title)
+        duplicate_material = next(
+            (item for item in load_materials() if _normalized_title(item.get("title", "")) == normalized),
+            None,
+        )
+        if duplicate_material:
+            return {"error": f"「{duplicate_material['title']}」は曲リストに登録済みです。検索してご利用ください。"}, 400
         rows = _requests()
+        duplicate_request = next(
+            (
+                row
+                for row in rows
+                if row.get("status") != "declined"
+                and _normalized_title(row.get("title", "")) == normalized
+            ),
+            None,
+        )
+        if duplicate_request:
+            return {"error": "同じ曲がすでにリクエストされています。「私も」を押してください。"}, 400
         if sum(1 for r in rows if r.get("user_id") == user_id and r.get("status") == "open") >= 20:
             return {"error": "リクエストがたまっています。先生の対応を待ってから追加してください。"}, 400
         instrument = str(body.get("instrument") or "").strip()

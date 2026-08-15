@@ -168,6 +168,7 @@ def send_schedule(
         target_members = members
 
     save_json("candidates", candidates)
+    save_json("schedule_targets", [m.get("user_id") for m in target_members if m.get("user_id")])
 
     if len(candidates) > LIFF_THRESHOLD:
         if not LIFF_ID:

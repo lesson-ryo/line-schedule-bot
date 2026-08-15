@@ -357,3 +357,134 @@ def test_each_webhook_uses_its_own_secret(client, tenant, secret):
         data=body,
         headers={"X-Line-Signature": wrong, "Content-Type": "application/json"},
     ).status_code == 400
+
+
+def test_song_edit_and_archive_keep_the_same_id(client, monkeypatch):
+    http, _, _ = client
+    import carte
+
+    current = {
+        "id": 430,
+        "title": "元の曲名",
+        "artist": "",
+        "instrument": "ウクレレ",
+        "kind": "弾き語り",
+        "video": "",
+        "note": "",
+        "genre": "",
+        "active": True,
+        "source": "sheet",
+    }
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_URL", "https://script.example/exec")
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_SECRET", "writer-secret")
+    monkeypatch.setattr(
+        carte,
+        "load_materials",
+        lambda force=False, include_inactive=False: [dict(current)],
+    )
+    payloads = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "id": 430}
+
+    monkeypatch.setattr(
+        carte.requests,
+        "post",
+        lambda url, json, timeout: (payloads.append(dict(json)) or Response()),
+    )
+    with http.application.test_request_context("/kanto/carte"):
+        from flask import g
+
+        g.tenant = "kanto"
+        item, error = carte.update_material(
+            430,
+            {**current, "title": "変更後の曲名"},
+            "update",
+        )
+        assert not error
+        assert item["id"] == 430
+        archived, error = carte.update_material(430, action="archive")
+        assert not error
+        assert archived["id"] == 430
+        assert archived["active"] is False
+    assert payloads[0]["action"] == "update"
+    assert payloads[0]["id"] == 430
+    assert payloads[1]["action"] == "archive"
+
+
+def test_schedule_conflict_is_detected_across_regions(client):
+    http, storage, _ = client
+    from flask import g
+    from lesson_operations import cross_tenant_conflicts
+
+    with http.application.test_request_context("/kanto/admin/panel"):
+        g.tenant = "kanto"
+        storage.save_json(
+            "assignment",
+            [{"day": "2026-08-20", "time": "13:00", "end": "14:00", "name": "関東A"}],
+        )
+        g.tenant = "kansai"
+        problems = cross_tenant_conflicts(
+            "kansai",
+            [{"day": "2026-08-20", "time": "13:30", "end": "14:30", "name": "関西B"}],
+        )
+    assert problems
+    assert "関東" in problems[0]
+
+
+def test_reminder_preview_targets_only_nonrespondents(client):
+    http, storage, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+    from flask import g
+
+    with http.application.test_request_context("/kansai/admin/panel"):
+        g.tenant = "kansai"
+        storage.save_json(
+            "members",
+            [
+                {"user_id": "answered", "display_name": "回答済み"},
+                {"user_id": "waiting", "display_name": "未回答"},
+            ],
+        )
+        storage.save_json(
+            "votes",
+            [{"user_id": "answered", "display_name": "回答済み", "candidate_index": 1}],
+        )
+        storage.save_json("schedule_targets", ["answered", "waiting"])
+    page = http.get("/admin/reminders/kansai", **secure)
+    html = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "未回答" in html
+    assert "未回答者リマインド（1人）" in html
+
+
+def test_full_backup_can_be_restored_with_a_safety_copy(client):
+    http, storage, tmp_path = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+    from flask import g
+    import maintenance
+
+    with http.application.test_request_context("/kansai/admin/panel"):
+        g.tenant = "kansai"
+        storage.save_json("members", [{"user_id": "before"}])
+        first = maintenance.save_snapshot()
+        storage.save_json("members", [{"user_id": "after"}])
+        result = maintenance.restore_snapshot(0)
+        assert storage.load_json("members")[0]["user_id"] == "before"
+    snapshots = json.loads((Path(tmp_path) / "kanto_carte_backups.json").read_text())
+    assert len(snapshots) == 2
+    assert result["restored_at"] == first["created_at"]
+
+
+def test_student_carte_has_tap_summary_filters(client):
+    http, _, _ = client
+    html = http.get("/kanto/carte").get_data(as_text=True)
+    assert "function renderSummary()" in html
+    assert "function chooseSummary(value)" in html
+    assert "次回" in html
