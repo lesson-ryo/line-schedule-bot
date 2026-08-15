@@ -10,9 +10,12 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import os
 import time
+import unicodedata
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from flask import Blueprint, abort, make_response, redirect, request
@@ -68,9 +71,186 @@ def load_materials(force=False):
                 "genre": genre,
             }
         )
+    custom = load_json("carte:custom_materials", default=[])
+    if isinstance(custom, list):
+        known_ids = {item["id"] for item in items}
+        for item in custom:
+            if not isinstance(item, dict) or not str(item.get("id", "")).isdigit():
+                continue
+            material_id = int(item["id"])
+            title = str(item.get("title", "")).strip()
+            if not title or material_id in known_ids:
+                continue
+            items.append(
+                {
+                    "id": material_id,
+                    "instrument": str(item.get("instrument", "")).strip(),
+                    "kind": str(item.get("kind", "")).strip(),
+                    "title": title,
+                    "artist": str(item.get("artist", "")).strip(),
+                    "video": str(item.get("video", "")).strip(),
+                    "note": str(item.get("note", "")).strip(),
+                    "genre": str(item.get("genre", "")).strip(),
+                    "source": "custom",
+                }
+            )
+            known_ids.add(material_id)
     items.sort(key=lambda x: x["id"], reverse=True)
     _material_cache.update(at=time.time(), items=items)
     return items
+
+
+def _normalized_title(value: str) -> str:
+    value = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return "".join(value.split())
+
+
+def _youtube_video_id(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    host = (parsed.hostname or "").lower()
+    if host == "youtu.be":
+        return parsed.path.strip("/").split("/", 1)[0]
+    if host == "youtube.com" or host.endswith(".youtube.com"):
+        if parsed.path == "/watch":
+            return (parse_qs(parsed.query).get("v") or [""])[0]
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) >= 2 and parts[0] in {"embed", "shorts", "live"}:
+            return parts[1]
+    return ""
+
+
+def add_material(values: dict) -> tuple[dict | None, str, str]:
+    """Add a repertoire item through the optional Sheet writer or shared Redis.
+
+    Returns ``(item, source, error)``. The Redis fallback makes the teacher form
+    useful immediately; configuring REPERTOIRE_SHEET_WRITE_URL upgrades it to a
+    direct Google Sheet write without changing the UI.
+    """
+    title = str(values.get("title", "")).strip()[:120]
+    instrument = str(values.get("instrument", "")).strip()
+    kind = str(values.get("kind", "")).strip()
+    artist = str(values.get("artist", "")).strip()[:120]
+    video = str(values.get("video", "")).strip()[:500]
+    note = str(values.get("note", "")).strip()[:500]
+    genre = str(values.get("genre", "")).strip()[:80]
+
+    if not title:
+        return None, "", "曲名を入力してください。"
+    if instrument not in {"", "ウクレレ", "ギター"}:
+        return None, "", "楽器が正しくありません。"
+    if kind not in {"", "弾き語り", "ソロ弾き", "メロ弾き", "デュオ"}:
+        return None, "", "形態が正しくありません。"
+    video_id = ""
+    if video:
+        parsed = urlparse(video)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None, "", "YouTube URLが正しくありません。"
+        video_id = _youtube_video_id(video)
+        if not video_id:
+            return None, "", "YouTube動画のURLを入力してください。"
+
+    materials = load_materials(force=True)
+    normalized = _normalized_title(title)
+    for item in materials:
+        if _normalized_title(item.get("title", "")) == normalized:
+            return None, "", f"同じ曲名がすでにあります（ID {item['id']}）。"
+        existing_video = str(item.get("video", "")).strip()
+        if video and (
+            existing_video == video
+            or (video_id and _youtube_video_id(existing_video) == video_id)
+        ):
+            return None, "", f"同じ動画URLがすでにあります（ID {item['id']}）。"
+
+    payload = {
+        "title": title,
+        "instrument": instrument,
+        "kind": kind,
+        "artist": artist,
+        "video": video,
+        "note": note,
+        "genre": genre,
+    }
+    write_url = os.environ.get("REPERTOIRE_SHEET_WRITE_URL", "").strip()
+    if write_url:
+        payload["secret"] = os.environ.get("REPERTOIRE_SHEET_WRITE_SECRET", "")
+        try:
+            response = requests.post(write_url, json=payload, timeout=20)
+            response.raise_for_status()
+            result = response.json()
+            if not result.get("ok"):
+                raise RuntimeError(result.get("error") or "Google Sheetへの追加に失敗しました。")
+            _material_cache.update(at=0.0, items=[])
+            item = dict(payload, id=int(result["id"]), source="sheet")
+            item.pop("secret", None)
+            return item, "sheet", ""
+        except Exception as exc:
+            return None, "", f"Google Sheetへの追加に失敗しました: {str(exc)[:240]}"
+
+    custom = load_json("carte:custom_materials", default=[])
+    if not isinstance(custom, list):
+        custom = []
+    material_id = max(
+        [999999]
+        + [int(item.get("id", 0)) for item in custom if str(item.get("id", "")).isdigit()]
+    ) + 1
+    item = dict(payload, id=material_id, source="custom", created_at=_now())
+    custom.append(item)
+    save_json("carte:custom_materials", custom[-2000:])
+    _material_cache.update(at=0.0, items=[])
+    return item, "custom", ""
+
+
+def next_lesson_groups() -> list[dict]:
+    materials = {item["id"]: item for item in load_materials()}
+    members = {item.get("user_id"): item for item in _carte_members()}
+    grouped = {}
+    for row in _progress():
+        if not row.get("next_lesson"):
+            continue
+        material = materials.get(row.get("material_id"))
+        if not material:
+            continue
+        user_id = row.get("user_id", "")
+        if not user_id:
+            continue
+        group = grouped.setdefault(
+            user_id,
+            {
+                "user_id": user_id,
+                "display_name": row.get("display_name")
+                or members.get(user_id, {}).get("display_name", "名前未登録"),
+                "items": [],
+            },
+        )
+        group["items"].append(
+            {
+                "id": material["id"],
+                "title": material["title"],
+                "artist": material.get("artist", ""),
+                "video": material.get("video", ""),
+                "teacher_note": row.get("teacher_note", ""),
+                "student_note": row.get("student_note", ""),
+            }
+        )
+    for group in grouped.values():
+        group["items"].sort(key=lambda item: item["id"], reverse=True)
+    return sorted(grouped.values(), key=lambda item: item["display_name"])
+
+
+def build_next_lesson_message(group: dict) -> str:
+    lines = [f"{group.get('display_name', '')}さん", "", "次回レッスンで取り組む曲です。"]
+    for index, item in enumerate(group.get("items", []), start=1):
+        title = item.get("title", "")
+        artist = item.get("artist", "")
+        lines.extend(["", f"{index}. {title}{' / ' + artist if artist else ''}"])
+        videos = str(item.get("video", "")).split()
+        if videos:
+            lines.append(videos[0])
+        note = item.get("teacher_note") or item.get("student_note")
+        if note:
+            lines.append(f"メモ: {str(note)[:300]}")
+    lines.extend(["", "よろしくお願いします。"])
+    return "\n".join(lines)[:4900]
 
 
 def _progress():
@@ -313,7 +493,7 @@ async function main(){await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){l
 
 ADMIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>生徒カルテ管理</title><style>
 :root{--green:#087f5b;--amber:#a06a00;--line:#dfe3e6;--muted:#687078;--bg:#f5f7f8}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;margin:0;background:var(--bg);color:#202428}header{height:62px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 24px}header h1{font-size:20px;margin:0}.page{padding:20px 24px}.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px}.toolbar input,.toolbar select{height:40px;border:1px solid #bec5c9;border-radius:7px;background:#fff;padding:0 12px;font-size:14px}.toolbar input{width:360px}.toolbar button{height:40px;border:1px solid #bec5c9;border-radius:7px;background:#fff;padding:0 14px;font-size:13px;cursor:pointer}.toolbar button:hover{background:#f3f6f5}.toolbar button:disabled{color:#9aa1a6;cursor:default}.count{color:var(--muted);font-size:13px;white-space:nowrap}.link{color:#0f6e56;font-size:13px;text-decoration:none;border-bottom:1px solid #0f6e56;white-space:nowrap}.hint{margin-left:auto;color:var(--muted);font-size:12px}@media(max-width:1100px){.hint{display:none}}.sheet{background:#fff;border:1px solid var(--line);border-radius:9px;overflow:auto;height:calc(100vh - 135px)}table{border-collapse:separate;border-spacing:0;min-width:100%;white-space:nowrap}th,td{border-right:1px solid var(--line);border-bottom:1px solid var(--line)}th{height:50px;padding:8px 12px;background:#f8faf9;font-size:13px;text-align:center;position:sticky;top:0;z-index:2}.song-head{left:0;z-index:4;text-align:left;min-width:290px}.song{position:sticky;left:0;z-index:1;background:#fff;min-width:290px;max-width:290px;padding:9px 12px}.song .t{overflow:hidden;text-overflow:ellipsis}.song em{font-style:normal;color:var(--muted);font-size:12px;margin-left:7px}.song>span{display:block;overflow:hidden;text-overflow:ellipsis;margin-top:4px}.tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;margin-right:4px;white-space:nowrap}.tag.uk{background:#e6f1fb;color:#0c447c}.tag.gt{background:#faece7;color:#712b13}.tag.kind{background:#f1efe8;color:#444441}.tag.genre{background:#eeedfe;color:#3c3489}.vid{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;margin-right:4px;background:#fdeaea;color:#a32d2d;font-weight:700;text-decoration:none}.vid:hover{background:#f7d4d4}.student{min-width:240px;max-width:240px}.cell{min-width:240px;max-width:240px;height:58px;padding:5px 8px;cursor:pointer;background:#fff}.cell:hover{background:#eef8f3}.cell-content{display:flex;align-items:center;gap:9px;min-width:0}.status-block{flex:0 0 86px;text-align:center}.done{display:block;color:#087f5b;font-weight:700;font-size:13px}.wanted{display:block;color:var(--amber);font-weight:700;font-size:13px}.notdone{display:block;color:#8a9298;font-size:13px}.lesson-date{display:block;color:#596168;font-size:11px;margin-top:3px}.memo-preview{flex:1;min-width:0;color:#5f4a12;background:#fff8dc;border-radius:5px;padding:5px 7px;font-size:11px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{padding:50px;text-align:center;color:var(--muted)}dialog{border:0;border-radius:12px;padding:0;box-shadow:0 18px 60px rgba(0,0,0,.25);width:min(420px,calc(100% - 30px))}dialog::backdrop{background:rgba(20,30,26,.4)}.modal{padding:24px}.modal h2{font-size:19px;margin:0 0 5px}.modal .who{color:var(--muted);font-size:13px;margin-bottom:20px}.choice{display:flex;gap:6px;margin-bottom:16px}.choice label{flex:1;border:1px solid var(--line);border-radius:8px;padding:12px 4px;text-align:center;cursor:pointer;font-size:13px}.nextbox{display:block;border:1px solid #e0d3b0;background:#fffbf0;border-radius:8px;padding:11px 12px;font-size:13px;cursor:pointer}.student-set{display:block;margin-top:5px}.student-set select{height:26px;border:1px solid #cfd5d8;border-radius:5px;background:#fff;font-size:11px;padding:0 4px}.nextmark{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:#fff3d6;color:#854f0b;margin-top:3px}.field{margin-top:14px}.field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px}.field input,.field textarea{width:100%;border:1px solid #bec5c9;border-radius:7px;padding:0 10px;font-size:16px}.field input{height:43px}.field textarea{height:96px;padding:10px;resize:vertical;font-family:inherit}.actions{display:flex;gap:8px;margin-top:20px}.actions button{flex:1;height:42px;border-radius:7px;border:1px solid #bec5c9;background:#fff;cursor:pointer}.actions .save{background:var(--green);border-color:var(--green);color:#fff;font-weight:700}.video-dialog{width:min(760px,calc(100% - 30px));background:#111;color:#fff}.video-modal{padding:14px}.video-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.video-head button{border:1px solid #555;border-radius:7px;background:#222;color:#fff;padding:7px 12px;cursor:pointer}.video-frame{position:relative;width:100%;padding-top:56.25%;background:#000}.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.video-fallback{display:block;color:#fff;text-align:center;font-size:12px;margin-top:12px}.notice{position:fixed;right:24px;bottom:20px;background:#183d31;color:#fff;padding:10px 16px;border-radius:7px;display:none}@media(max-width:700px){.page{padding:12px}.toolbar{flex-wrap:wrap}.toolbar input{width:100%}.hint{margin-left:0}.song-head,.song{min-width:220px;max-width:220px}}
-</style></head><body><header><h1>生徒カルテ管理</h1></header><main class="page"><div class="toolbar"><input id="q" placeholder="曲名・アーティストを検索"><select id="filter"><option value="all">すべての曲</option><option value="used">実施記録がある曲</option><option value="wanted">やりたい人がいる曲</option><option value="next">次回レッスン曲</option></select><span class="count" id="count">読み込み中…</span><button id="syncBtn" onclick="sync()">シートを再読み込み</button><a class="link" href="/admin/carte/ranking">ランキング</a><a class="link" href="/admin/carte/requests">リクエスト曲</a><a class="link" href="/admin/carte/history">更新履歴</a><span class="hint">セルをクリックして実施状況・授業日・メモを入力</span></div><div class="sheet" id="sheet"><div class="empty">読み込み中…</div></div></main><dialog id="editor"><form class="modal" onsubmit="save(event)"><h2 id="editSong"></h2><div class="who" id="editStudent"></div><div class="choice"><label><input type="radio" name="state" value="notdone"> 未実施</label><label><input type="radio" name="state" value="wanted"> ★ やりたい</label><label><input type="radio" name="state" value="done"> ✓ 実施済み</label></div><label class="nextbox"><input type="checkbox" id="nextLesson"> ▶ 次回レッスンでやる</label><div class="field"><label for="lessonDate">授業日</label><input type="date" id="lessonDate"></div><div class="field"><label for="studentNote">生徒メモ</label><textarea id="studentNote" maxlength="1000" placeholder="生徒が書いたメモを確認・編集できます"></textarea></div><div class="actions"><button type="button" onclick="editor.close()">キャンセル</button><button class="save" id="saveButton">保存</button></div></form></dialog><dialog id="videoDialog" class="video-dialog"><div class="video-modal"><div class="video-head"><strong>YouTube</strong><button type="button" onclick="closeVideo()">閉じる</button></div><div class="video-frame"><iframe id="videoFrame" title="YouTube動画" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><a id="videoFallback" class="video-fallback" target="_blank" rel="noopener">再生できない場合はYouTubeで開く</a></div></dialog><div class="notice" id="notice">保存しました</div><script>
+</style></head><body><header><h1>生徒カルテ管理</h1></header><main class="page"><div class="toolbar"><input id="q" placeholder="曲名・アーティストを検索"><select id="filter"><option value="all">すべての曲</option><option value="used">実施記録がある曲</option><option value="wanted">やりたい人がいる曲</option><option value="next">次回レッスン曲</option></select><span class="count" id="count">読み込み中…</span><button id="syncBtn" onclick="sync()">シートを再読み込み</button><a class="link" href="/admin/carte/next">次回まとめ</a><a class="link" href="/admin/carte/ranking">ランキング</a><a class="link" href="/admin/carte/requests">リクエスト曲</a><a class="link" href="/admin/carte/history">更新履歴</a><span class="hint">セルをクリックして実施状況・授業日・メモを入力</span></div><div class="sheet" id="sheet"><div class="empty">読み込み中…</div></div></main><dialog id="editor"><form class="modal" onsubmit="save(event)"><h2 id="editSong"></h2><div class="who" id="editStudent"></div><div class="choice"><label><input type="radio" name="state" value="notdone"> 未実施</label><label><input type="radio" name="state" value="wanted"> ★ やりたい</label><label><input type="radio" name="state" value="done"> ✓ 実施済み</label></div><label class="nextbox"><input type="checkbox" id="nextLesson"> ▶ 次回レッスンでやる</label><div class="field"><label for="lessonDate">授業日</label><input type="date" id="lessonDate"></div><div class="field"><label for="studentNote">生徒メモ</label><textarea id="studentNote" maxlength="1000" placeholder="生徒が書いたメモを確認・編集できます"></textarea></div><div class="actions"><button type="button" onclick="editor.close()">キャンセル</button><button class="save" id="saveButton">保存</button></div></form></dialog><dialog id="videoDialog" class="video-dialog"><div class="video-modal"><div class="video-head"><strong>YouTube</strong><button type="button" onclick="closeVideo()">閉じる</button></div><div class="video-frame"><iframe id="videoFrame" title="YouTube動画" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><a id="videoFallback" class="video-fallback" target="_blank" rel="noopener">再生できない場合はYouTubeで開く</a></div></dialog><div class="notice" id="notice">保存しました</div><script>
 let data,progress={},editing={};const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const key=(uid,mid)=>uid+'|'+mid;const isDone=p=>p?.lesson_done===true||(!('lesson_done' in (p||{}))&&p?.status==='completed');const stateOf=p=>isDone(p)?'done':(p?.status==='wanted'?'wanted':'notdone');const stateLabel=s=>s==='done'?'✓ 実施済み':(s==='wanted'?'★ やりたい':'未実施');const lessonDate=p=>p?.lesson_date||(p?.status==='completed'&&p?.completed_at?p.completed_at.slice(0,10):'');const jaDate=s=>s?s.replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$1/$2/$3'):'';
 async function load(){let r=await fetch('/admin/carte/data'),d=await r.json();if(!r.ok)throw Error(d.error||'取得失敗');data=d;progress=Object.fromEntries(d.progress.map(p=>[key(p.user_id,p.material_id),p]));draw()}
@@ -390,6 +570,19 @@ filter.onchange=draw;load().catch(e=>{list.innerHTML='<div class="empty">'+esc(e
 </script></body></html>"""
 
 
+NEXT_LESSON_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>次回レッスンまとめ</title><style>
+:root{--green:#087f5b;--line:#dfe3e6;--muted:#687078}*{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#202428;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}header{height:62px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 20px;gap:16px}header h1{font-size:20px;margin:0}header a{margin-left:auto;color:var(--green);text-decoration:none}.page{max-width:900px;margin:0 auto;padding:20px}.note{color:var(--muted);font-size:13px}.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin:12px 0}.head{display:flex;align-items:center;gap:10px}.head h2{font-size:17px;margin:0}.count{color:var(--muted);font-size:12px}.send{margin-left:auto;border:0;border-radius:7px;background:var(--green);color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}.send:disabled{opacity:.5}.song{border-top:1px solid #eef0f1;padding:11px 0}.song:first-of-type{margin-top:12px}.song b{font-size:14px}.song a{display:block;color:#a32d2d;font-size:12px;margin-top:4px;overflow:hidden;text-overflow:ellipsis}.memo{font-size:12px;color:#5f4a12;background:#fff8dc;border-radius:5px;padding:6px 8px;margin-top:5px}.empty{text-align:center;color:var(--muted);padding:50px}.notice{position:fixed;right:20px;bottom:20px;background:#183d31;color:#fff;padding:10px 16px;border-radius:7px;display:none}
+</style></head><body><header><h1>次回レッスンまとめ</h1><a href="/admin/carte">カルテに戻る</a></header><main class="page"><p class="note">カルテで「次回レッスンでやる」にチェックした曲を、生徒ごとにまとめてLINE送信できます。</p><div id="list"><div class="empty">読み込み中…</div></div></main><div class="notice" id="notice"></div><script>
+const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let groups=[];
+function draw(){list.innerHTML=groups.length?groups.map(g=>`<section class="card"><div class="head"><h2>${esc(g.display_name||'名前未登録')}</h2><span class="count">${g.items.length}曲</span><button class="send" onclick="sendNext('${esc(g.user_id)}',this)">LINEに送る</button></div>${g.items.map((x,i)=>`<div class="song"><b>${i+1}. ${esc(x.title)}${x.artist?' / '+esc(x.artist):''}</b>${x.video?`<a href="${esc(x.video)}" target="_blank" rel="noopener">${esc(x.video)}</a>`:''}${(x.teacher_note||x.student_note)?`<div class="memo">${esc(x.teacher_note||x.student_note)}</div>`:''}</div>`).join('')}</section>`).join(''):'<div class="empty">次回レッスン曲はまだ設定されていません</div>'}
+async function load(){let r=await fetch('/admin/carte/next/data'),d=await r.json();if(!r.ok)throw Error(d.error||'取得に失敗しました');groups=d.groups||[];draw()}
+async function sendNext(uid,b){let g=groups.find(x=>x.user_id===uid);if(!g||!confirm((g.display_name||'この生徒')+'さんへ次回レッスン曲を送りますか？'))return;b.disabled=true;try{let r=await fetch('/admin/carte/next/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid})}),d=await r.json();if(!r.ok)throw Error(d.error||'送信に失敗しました');notice.textContent='LINEに送信しました';notice.style.display='block';setTimeout(()=>notice.style.display='none',2200)}catch(e){alert(e.message)}finally{b.disabled=false}}
+load().catch(e=>list.innerHTML='<div class="empty">'+esc(e.message)+'</div>');
+</script></body></html>"""
+
+
 ADMIN_LOGIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ログイン</title><style>
 *{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#202428;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;min-height:100vh;display:grid;place-items:center}.box{width:min(420px,calc(100% - 32px));background:#fff;border:1px solid #dfe3e6;border-radius:12px;padding:30px;box-shadow:0 8px 30px rgba(20,40,30,.08)}h1{font-size:22px;margin:0 0 8px}.sub{color:#687078;font-size:14px;margin:0 0 24px}label{display:block;font-size:13px;font-weight:700;margin-bottom:7px}input{width:100%;height:46px;border:1px solid #bcc3c7;border-radius:7px;padding:0 12px;font-size:17px}button{width:100%;height:46px;border:0;border-radius:7px;background:#087f5b;color:#fff;font-size:16px;font-weight:700;margin-top:16px;cursor:pointer}.error{background:#fff1f0;color:#a52b21;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:16px}
@@ -400,7 +593,9 @@ def render_student_page(liff_id):
     return STUDENT_HTML.replace("__LIFF_ID__", str(liff_id))
 
 
-def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id):
+def create_carte_blueprint(
+    verify_liff_user, upsert_member, admin_token, liff_id, push_text=None
+):
     bp = Blueprint("carte", __name__)
 
     def admin_cookie_value():
@@ -410,6 +605,10 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         ).hexdigest()
 
     def is_admin():
+        from admin_auth import teacher_session_ok
+
+        if teacher_session_ok():
+            return True
         token = str(admin_token)
         if not token:
             return False
@@ -535,22 +734,32 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
 
     @bp.post("/admin/carte/login")
     def admin_login():
+        from admin_auth import password_ok, set_teacher_cookie
+
         password = request.form.get("password", "")
         token = str(admin_token)
-        if not token or not hmac.compare_digest(password, token):
+        shared_ok = password_ok(password)
+        tenant_ok = bool(token) and hmac.compare_digest(password, token)
+        if not shared_ok and not tenant_ok:
             error = '<div class="error">合言葉が違います。もう一度お試しください。</div>'
             return ADMIN_LOGIN_HTML.replace("__ERROR__", error), 401
         response = make_response(redirect("/admin/carte"))
-        response.set_cookie(
-            "carte_admin", admin_cookie_value(), max_age=60 * 60 * 24 * 30,
-            secure=True, httponly=True, samesite="Strict"
-        )
+        if shared_ok:
+            set_teacher_cookie(response)
+        else:
+            response.set_cookie(
+                "carte_admin", admin_cookie_value(), max_age=60 * 60 * 24 * 30,
+                secure=True, httponly=True, samesite="Strict"
+            )
         return response
 
     @bp.post("/admin/carte/logout")
     def admin_logout():
+        from admin_auth import clear_teacher_cookie
+
         response = make_response(redirect("/admin/carte"))
         response.delete_cookie("carte_admin", secure=True, httponly=True, samesite="Strict")
+        clear_teacher_cookie(response)
         return response
 
     @bp.get("/admin/carte/data")
@@ -644,6 +853,48 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         """誰がいつ何を変えたかの一覧（講師のみ）。"""
         require_admin()
         return HISTORY_HTML
+
+    @bp.get("/admin/carte/next")
+    def admin_next_lesson():
+        require_admin()
+        return NEXT_LESSON_HTML
+
+    @bp.get("/admin/carte/next/data")
+    def admin_next_lesson_data():
+        require_admin()
+        return {"groups": next_lesson_groups()}
+
+    @bp.post("/admin/carte/next/send")
+    def admin_next_lesson_send():
+        require_admin()
+        if push_text is None:
+            return {"error": "LINE送信機能が設定されていません。"}, 503
+        body = request.get_json(silent=True) or {}
+        user_id = str(body.get("user_id") or "")
+        group = next(
+            (item for item in next_lesson_groups() if item.get("user_id") == user_id),
+            None,
+        )
+        if not group:
+            return {"error": "次回レッスン曲が見つかりません。"}, 404
+        message = build_next_lesson_message(group)
+        try:
+            push_text(user_id, message)
+        except Exception as exc:
+            return {"error": f"LINE送信に失敗しました: {str(exc)[:240]}"}, 502
+        notifications = load_json("carte:notifications", default=[])
+        if not isinstance(notifications, list):
+            notifications = []
+        notifications.append(
+            {
+                "user_id": user_id,
+                "display_name": group.get("display_name", ""),
+                "material_ids": [item["id"] for item in group.get("items", [])],
+                "sent_at": _now(),
+            }
+        )
+        save_json("carte:notifications", notifications[-500:])
+        return {"ok": True, "sent_at": notifications[-1]["sent_at"]}
 
     @bp.post("/admin/carte/sync")
     def sync_materials():

@@ -55,6 +55,25 @@ def _redis_command(*args):
     return res.json().get("result")
 
 
+def storage_status() -> dict:
+    """Return a secret-free connectivity status for the teacher dashboard."""
+    if _using_upstash():
+        try:
+            result = _redis_command("PING")
+            return {"ok": result == "PONG", "backend": "Upstash Redis", "error": ""}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "backend": "Upstash Redis",
+                "error": str(exc)[:300],
+            }
+    try:
+        BASE_DIR.exists()
+        return {"ok": True, "backend": "local files", "error": ""}
+    except Exception as exc:
+        return {"ok": False, "backend": "local files", "error": str(exc)[:300]}
+
+
 def load_json(key: str, default=None):
     """key: 'members' / 'votes' / 'candidates' のような文字列。"""
     name = _key(key)

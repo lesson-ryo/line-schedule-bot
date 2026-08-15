@@ -6,7 +6,9 @@
 
 - 関西Webhook: `https://<service>.onrender.com/webhook/kansai`
 - 関東Webhook: `https://<service>.onrender.com/webhook/kanto`
-- 関西管理画面: `https://<service>.onrender.com/kansai/admin/panel?token=...`
+- 講師ホーム: `https://<service>.onrender.com/admin`
+- 関西管理画面: `https://<service>.onrender.com/kansai/admin/panel`
+- 関東管理画面: `https://<service>.onrender.com/kanto/admin/panel`
 - 関東カルテ: `https://<service>.onrender.com/kanto/carte`
 
 環境変数は `.env.example` のとおり `KANSAI_` / `KANTO_` で分けます。共有するUpstashでは、
@@ -15,6 +17,28 @@
 
 移行中に現在の2サービスへ同じコードがデプロイされても動作を維持できるよう、従来の単一地域用環境変数と
 `/webhook` も互換用に残しています。統合先の動作確認後に、新しい地域別URLへ切り替えてください。
+
+### 講師ホームでできること
+
+`/admin` へアクセスし、`MASTER_ADMIN_TOKEN` の合言葉でログインすると、以下を1か所から操作できます。
+
+- 関西と関東の日程調整（候補・回答・確定データは地域別）
+- 共通の生徒カルテ
+- 「次回レッスンでやる」にした曲の生徒別まとめとLINE送信
+- 曲リストへの曲追加と重複チェック
+- Upstash、曲リスト、LINE設定、起動維持の状態確認
+- 日程調整とカルテの一括バックアップ（最大14世代）とJSONダウンロード
+
+ログインは30日間保持され、管理URLに合言葉を付ける必要はありません。従来の `?token=...` URLも互換用に残しています。
+
+### 曲追加の保存先
+
+曲追加画面は、同じ曲名または同じYouTube URLの二重登録を防ぎます。
+
+- `REPERTOIRE_SHEET_WRITE_URL` が未設定: 共通カルテのUpstash領域へ保存し、既存のGoogle Sheet曲リストと自動的に結合
+- 設定済み: `apps_script/` のWebアプリを経由して、元のGoogle Sheetへ直接追加
+
+Google Sheetへの直接書き込みを有効にする手順は `apps_script/README.md` を参照してください。
 
 LINE公式アカウントの友だち（メンバー）に日程候補を送ると、メンバーはLINEアプリ内で開くミニWebページ（LIFF）上でチェックボックスから複数選択して回答できるBotです。候補数に上限は実質なく（LINEのFlex Messageの50KB制限内であればOK）、集計は構造化データを読むだけなので自由記述の解釈ミスもありません。
 
@@ -101,6 +125,7 @@ git push -u origin main
    - `LINE_CHANNEL_ACCESS_TOKEN` … 手順1で控えたトークン
    - `LINE_CHANNEL_SECRET` … 手順1で控えたシークレット
    - `ADMIN_TOKEN` … 好きな文字列（推測されにくいランダムな文字列。「Generate」ボタンで自動生成できます）。日程送信・集計をブラウザから操作するための合言葉として使います
+   - `MASTER_ADMIN_TOKEN` … 講師ホーム共通の合言葉。Renderの「Generate」で長いランダム値を作成することを推奨
    - `UPSTASH_REDIS_REST_URL` … 手順2で控えた値
    - `UPSTASH_REDIS_REST_TOKEN` … 手順2で控えた値
 6. 「Create Web Service」でデプロイ開始（数分かかります）
@@ -154,11 +179,13 @@ git push -u origin main
 
 ### おすすめ：管理画面から操作する
 
-以下のURLをブックマークしておけば、日付と時間帯を選ぶだけで候補リストが自動生成され、送信先を選んでそのまま送信できます。URLを手で組み立てる必要はありません。
+最初に講師ホームへログインすると、関西・関東の日程調整と共通カルテをすべて開けます。
 
 ```
-https://your-app.onrender.com/admin/panel?token=YOUR_TOKEN
+https://your-app.onrender.com/admin
 ```
+
+ログイン後、日付と時間帯を選ぶだけで候補リストが自動生成され、送信先を選んでそのまま送信できます。URLを手で組み立てる必要はありません。
 
 管理画面でできること:
 
@@ -168,7 +195,7 @@ https://your-app.onrender.com/admin/panel?token=YOUR_TOKEN
 - 登録メンバーをチェックボックスで選んで送信先を絞り込み
 - そのままLINEへ送信、集計・リセットへのリンクも用意
 
-> このURLは合言葉（トークン）を含むので、他人に共有しないでください。
+> 講師ホームのURL自体には合言葉を含みません。共用端末では操作後にログアウトしてください。
 
 ### URLを直接叩いて操作する（従来の方法）
 
@@ -217,6 +244,11 @@ https://your-app.onrender.com/admin/reset?token=YOUR_TOKEN
 | ファイル | 役割 |
 |---|---|
 | `app.py` | LINEからのWebhook（友だち追加・LIFF投票受信）を受け取るサーバー本体 |
+| `admin_auth.py` | 講師ホームの共通ログインとセッション管理 |
+| `admin_portal.py` | 講師ホーム、曲追加、状態確認、バックアップ画面 |
+| `carte.py` | 共通カルテ、曲リスト、次回レッスンまとめ |
+| `maintenance.py` | 稼働状態の確認と一括バックアップ |
+| `apps_script/` | 曲をGoogle Sheetへ直接追加する任意の連携機能 |
 | `schedule_tools.py` | 日程候補の一斉送信・投票の集計を行うコマンドラインツール |
 | `storage.py` | データ保存の共通層。Upstash Redis（本番）またはローカルJSON（開発用フォールバック）を切り替える |
 | `requirements.txt` | 必要なPythonライブラリ |

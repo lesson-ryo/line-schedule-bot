@@ -9,6 +9,7 @@ import pytest
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    monkeypatch.setenv("MASTER_ADMIN_TOKEN", "master-admin")
     monkeypatch.setenv("KANSAI_CHANNEL_ACCESS_TOKEN", "kansai-token")
     monkeypatch.setenv("KANSAI_CHANNEL_SECRET", "kansai-secret")
     monkeypatch.setenv("KANSAI_ADMIN_TOKEN", "kansai-admin")
@@ -67,6 +68,188 @@ def test_admin_page_keeps_tenant_in_links(client):
     assert response.status_code == 200
     assert "関西 管理画面" in response.get_data(as_text=True)
     assert "'/kansai/admin/" in response.get_data(as_text=True)
+
+
+def test_shared_teacher_login_opens_all_admin_pages(client):
+    http, _, _ = client
+    secure = {"base_url": "https://localhost"}
+
+    response = http.post(
+        "/admin/login", data={"password": "master-admin"}, **secure
+    )
+    assert response.status_code == 302
+    home = http.get("/admin", **secure)
+    html = home.get_data(as_text=True)
+    assert home.status_code == 200
+    assert "/kansai/admin/panel" in html
+    assert "/kanto/admin/panel" in html
+    assert "/kanto/admin/carte" in html
+
+    panel = http.get("/kansai/admin/panel", **secure)
+    assert panel.status_code == 200
+    assert "kansai-admin" not in panel.get_data(as_text=True)
+    assert http.get("/kanto/admin/carte", **secure).status_code == 200
+
+
+def test_shared_teacher_login_rejects_wrong_password(client):
+    http, _, _ = client
+    response = http.post(
+        "/admin/login",
+        data={"password": "wrong"},
+        base_url="https://localhost",
+    )
+    assert response.status_code == 401
+
+
+def test_teacher_can_add_custom_song_without_sheet_writer(client, monkeypatch):
+    http, storage, tmp_path = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+
+    import carte
+
+    monkeypatch.setattr(carte, "load_materials", lambda force=False: [])
+    response = http.post(
+        "/admin/songs",
+        data={
+            "title": "新しい曲",
+            "instrument": "ウクレレ",
+            "kind": "弾き語り",
+            "video": "https://youtu.be/example123",
+        },
+        **secure,
+    )
+    assert response.status_code == 302
+    rows = json.loads(
+        (Path(tmp_path) / "kanto_carte_custom_materials.json").read_text()
+    )
+    assert rows[0]["title"] == "新しい曲"
+    assert rows[0]["id"] >= 1000000
+
+
+def test_song_entry_rejects_duplicate_youtube_alias(client, monkeypatch):
+    http, _, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+
+    import carte
+
+    monkeypatch.setattr(
+        carte,
+        "load_materials",
+        lambda force=False: [{
+            "id": 10,
+            "title": "登録済み",
+            "video": "https://www.youtube.com/watch?v=abc123",
+        }],
+    )
+    response = http.post(
+        "/admin/songs",
+        data={"title": "別名", "video": "https://youtu.be/abc123"},
+        **secure,
+    )
+    assert response.status_code == 400
+    assert "同じ動画URL" in response.get_data(as_text=True)
+
+
+def test_next_lesson_summary_can_be_sent(client, monkeypatch):
+    http, storage, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+
+    import app
+    import carte
+    from flask import g
+
+    monkeypatch.setattr(
+        carte,
+        "load_materials",
+        lambda force=False: [{
+            "id": 50,
+            "title": "次回の曲",
+            "artist": "",
+            "video": "https://youtu.be/next123",
+        }],
+    )
+    with http.application.test_request_context("/kanto/carte"):
+        g.tenant = "kanto"
+        storage.save_json(
+            "carte:members", [{"user_id": "student-1", "display_name": "生徒A"}]
+        )
+        storage.save_json(
+            "carte:progress",
+            [{
+                "user_id": "student-1",
+                "display_name": "生徒A",
+                "material_id": 50,
+                "next_lesson": True,
+                "student_note": "練習メモ",
+            }],
+        )
+
+    sent = []
+    monkeypatch.setattr(app, "push_text_message", lambda uid, text: sent.append((uid, text)))
+    data = http.get("/kanto/admin/carte/next/data", **secure).get_json()
+    assert data["groups"][0]["items"][0]["title"] == "次回の曲"
+
+    response = http.post(
+        "/kanto/admin/carte/next/send",
+        json={"user_id": "student-1"},
+        **secure,
+    )
+    assert response.status_code == 200
+    assert sent[0][0] == "student-1"
+    assert "次回の曲" in sent[0][1]
+
+
+def test_teacher_can_create_recoverable_snapshot(client):
+    http, _, tmp_path = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+    response = http.post("/admin/maintenance/backup", **secure)
+    assert response.status_code == 302
+    path = Path(tmp_path) / "kanto_carte_backups.json"
+    assert path.exists()
+    snapshots = json.loads(path.read_text())
+    assert snapshots[-1]["schedules"]["kansai"] is not None
+    assert snapshots[-1]["carte"] is not None
+
+
+def test_teacher_can_open_maintenance_status(client, monkeypatch):
+    http, _, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+
+    import maintenance
+
+    monkeypatch.setattr(
+        maintenance,
+        "system_status",
+        lambda: {
+            "storage": {"ok": True, "backend": "upstash", "error": ""},
+            "sheet": {"ok": True, "count": 429, "error": ""},
+            "tenants": {
+                "kansai": {
+                    "line_configured": True,
+                    "schedule_enabled": True,
+                    "carte_enabled": False,
+                },
+                "kanto": {
+                    "line_configured": True,
+                    "schedule_enabled": False,
+                    "carte_enabled": True,
+                },
+            },
+            "keepalive": {"configured": False, "enabled": False},
+            "backup": {"count": 1, "latest_at": "2026-08-16T00:00:00Z"},
+        },
+    )
+    response = http.get("/admin/maintenance", **secure)
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "429曲" in html
+    assert "1世代" in html
+    assert "関西 LINE" in html
 
 
 def test_storage_is_isolated_by_tenant(client):

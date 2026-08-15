@@ -14,7 +14,7 @@ import hmac
 import os
 import requests
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from flask import Flask, request, abort, g
 from werkzeug.local import LocalProxy
@@ -24,6 +24,7 @@ from linebot.v3.messaging import (
     Configuration,
     ApiClient,
     MessagingApi,
+    PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
 )
@@ -650,11 +651,32 @@ def liff_submit():
 def check_admin_token():
     """無料プランはShellが使えないため、ブラウザから叩けるURLで管理操作を行う。
     ?token=... にADMIN_TOKENと一致する値がないと403にする。"""
+    from admin_auth import teacher_session_ok
+
+    if teacher_session_ok():
+        return
     # POSTの確認画面から来る場合はフォームの隠しフィールドに入っている
     token = request.args.get("token", "") or request.form.get("token", "")
     admin_token = str(ADMIN_TOKEN)
     if not admin_token or not hmac.compare_digest(token, admin_token):
         abort(403)
+
+
+def admin_link(path: str, **params) -> str:
+    """Build admin links without exposing the token for cookie sessions."""
+    from admin_auth import teacher_session_ok
+
+    values = {key: value for key, value in params.items() if value not in (None, "")}
+    if not teacher_session_ok():
+        values["token"] = str(ADMIN_TOKEN)
+    url = f"/admin/{path.lstrip('/')}"
+    return url + ("?" + urlencode(values) if values else "")
+
+
+def admin_form_token() -> str:
+    from admin_auth import teacher_session_ok
+
+    return "" if teacher_session_ok() else str(ADMIN_TOKEN)
 
 
 ADMIN_PANEL_HTML = """<!DOCTYPE html>
@@ -1120,7 +1142,7 @@ def admin_keepalive():
     check_admin_token()
     import keepalive
 
-    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+    panel = admin_link("panel")
 
     if request.args.get("off"):
         msg = keepalive.disarm() or "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
@@ -1130,7 +1152,7 @@ def admin_keepalive():
     arm_date = request.args.get("arm")
     if arm_date is not None:
         msg = keepalive.arm(arm_date.strip()) or "cron-job.orgの設定（CRONJOB_API_KEY / CRONJOB_JOB_ID）がされていません。"
-        back = f"/admin/keepalive?token={ADMIN_TOKEN}"
+        back = admin_link("keepalive")
         return f'<pre>{msg}</pre><p><a href="{back}">状態を見る</a>　<a href="{panel}">管理画面に戻る</a></p>'
 
     s = keepalive.status()
@@ -1150,7 +1172,7 @@ def admin_keepalive():
             f"自動停止: {when}",
         ])
 
-    off = f"/admin/keepalive?token={ADMIN_TOKEN}&off=1"
+    off = admin_link("keepalive", off="1")
     return (
         f"<pre>{body}</pre>"
         f'<p><a href="{off}">今すぐ止める</a>　<a href="{panel}">管理画面に戻る</a></p>'
@@ -1211,10 +1233,10 @@ def admin_assign():
     # 通知で使えるように結果を保存しておく
     save_json("assignment", result.get("schedule", []))
 
-    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+    panel = admin_link("panel")
     body = assign_mod.format_result(result)
-    notify = f"/admin/notify?token={ADMIN_TOKEN}"
-    edit = f"/admin/schedule?token={ADMIN_TOKEN}"
+    notify = admin_link("notify")
+    edit = admin_link("schedule")
     links = (
         f'<p><a href="{edit}">担当を手動で調整する</a>　'
         f'<a href="{notify}">この内容を各自にLINEで送る</a>　'
@@ -1414,7 +1436,7 @@ def admin_notify():
     if not schedule:
         return (
             "<pre>送信できる割り当て結果がありません。先に「時間枠を自動で割り当てる」を実行してください。</pre>"
-            f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
+            f'<p><a href="{admin_link("panel")}">管理画面に戻る</a></p>'
         )
 
     message = request.args.get("message", "") or load_json("notify_message", default="")
@@ -1425,7 +1447,7 @@ def admin_notify():
         result = send_notifications(items)
         return (
             f"<pre>{result}</pre>"
-            f'<p><a href="/admin/panel?token={ADMIN_TOKEN}">管理画面に戻る</a></p>'
+            f'<p><a href="{admin_link("panel")}">管理画面に戻る</a></p>'
         )
 
     total = sum(len(i["user_ids"]) for i in items)
@@ -1435,15 +1457,15 @@ def admin_notify():
         preview.append(i["text"])
         preview.append("")
 
-    send_url = (
-        f"/admin/notify?token={ADMIN_TOKEN}&send=1&message={quote(message or DEFAULT_NOTIFY_MESSAGE)}"
+    send_url = admin_link(
+        "notify", send="1", message=message or DEFAULT_NOTIFY_MESSAGE
     )
     return (
         f"<pre>{chr(10).join(preview)}</pre>"
         f'<p><a href="{send_url}" '
         f"onclick=\"return confirm('{total}通を送信します。よろしいですか？')\">"
         f"この内容で送信する</a>　"
-        f'<a href="/admin/panel?token={ADMIN_TOKEN}">やめる</a></p>'
+        f'<a href="{admin_link("panel")}">やめる</a></p>'
     )
 
 
@@ -1555,7 +1577,7 @@ def admin_reset_confirm():
     return (
         RESET_PAGE_HTML.replace("__ROWS__", rows)
         .replace("__BACKUP__", backup)
-        .replace("__TOKEN__", str(ADMIN_TOKEN))
+        .replace("__TOKEN__", admin_form_token())
     )
 
 
@@ -1567,8 +1589,8 @@ def admin_reset():
 
     backup_replies()
     result = reset_replies()
-    panel = f"/admin/panel?token={ADMIN_TOKEN}"
-    undo = f"/admin/reset/restore?token={ADMIN_TOKEN}"
+    panel = admin_link("panel")
+    undo = admin_link("reset/restore")
     return (
         f"<pre>{result}\n\n控えを保存しました。間違えた場合はすぐ戻せます。</pre>"
         f'<p><a href="{undo}">元に戻す</a>　<a href="{panel}">管理画面に戻る</a></p>'
@@ -1581,7 +1603,7 @@ def admin_reset_restore():
     check_admin_token()
     from schedule_tools import restore_replies, backup_info
 
-    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+    panel = admin_link("panel")
 
     if request.method == "POST":
         result = restore_replies()
@@ -1596,7 +1618,7 @@ def admin_reset_restore():
         f"<pre>{info['at'][:16].replace('T', ' ')} の控えに戻します。\n\n{detail}\n\n"
         "今のデータは上書きされます。</pre>"
         f'<form method="post" action="/admin/reset/restore">'
-        f'<input type="hidden" name="token" value="{ADMIN_TOKEN}">'
+        f'<input type="hidden" name="token" value="{admin_form_token()}">'
         f'<button type="submit">この控えに戻す</button></form>'
         f'<p><a href="{panel}">やめる</a></p>'
     )
@@ -1671,13 +1693,25 @@ def handle_message(event):
         )
 
 
+def push_text_message(user_id: str, text: str) -> None:
+    """Send one teacher-approved text message on the active tenant channel."""
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).push_message(
+            PushMessageRequest(
+                to=user_id,
+                messages=[TextMessage(text=str(text)[:5000])],
+            )
+        )
+
+
 # --- 生徒カルテ ------------------------------------------------------------
 # Blueprintは1回だけ登録し、公開可否と設定値はrequestのtenantで切り替える。
 from carte import create_carte_blueprint
 
 app.register_blueprint(
     create_carte_blueprint(
-        verify_liff_user, upsert_member, ADMIN_TOKEN, CARTE_LIFF_ID
+        verify_liff_user, upsert_member, ADMIN_TOKEN, CARTE_LIFF_ID,
+        lambda user_id, text: push_text_message(user_id, text),
     )
 )
 
@@ -1686,6 +1720,10 @@ app.register_blueprint(
 def _block_disabled_features():
     """日程調整を使わない地域では、日程調整の画面を閉じる。
     SCHEDULE_ENABLEDが未設定なら何もしない（＝従来どおり全部開いている）。"""
+    if (request.endpoint or "").startswith("teacher_admin."):
+        g.tenant = None
+        return None
+
     tenant = (request.view_args or {}).pop("tenant", None)
     if tenant is not None:
         if tenant not in TENANTS:
@@ -1745,6 +1783,12 @@ def _register_tenant_routes():
 
 
 _register_tenant_routes()
+
+# These routes are intentionally registered after tenant route cloning. They
+# are one shared teacher portal, not regional copies.
+from admin_portal import create_admin_portal_blueprint
+
+app.register_blueprint(create_admin_portal_blueprint())
 
 
 if __name__ == "__main__":
