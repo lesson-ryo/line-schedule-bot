@@ -33,10 +33,14 @@ def _using_upstash() -> bool:
 
 
 def _key(key: str) -> str:
-    """現在のtenantの接頭辞を付け、地域間のデータ混入を防ぐ。"""
+    """日程はtenant別、カルテは全地域共通の名前空間へ保存する。"""
     from tenant_config import get_tenant
 
-    prefix = get_tenant().storage_prefix
+    if key.startswith("carte:"):
+        # 既存の関東カルテは kanto:carte:* にあるため、そのまま共通カルテとして使う。
+        prefix = os.environ.get("CARTE_STORAGE_PREFIX", "kanto:")
+    else:
+        prefix = get_tenant().storage_prefix
     return f"{prefix}{key}" if prefix else key
 
 

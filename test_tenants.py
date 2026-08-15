@@ -69,6 +69,20 @@ def test_storage_is_isolated_by_tenant(client):
     assert json.loads((Path(tmp_path) / "kanto_members.json").read_text()) == [{"user_id": "east"}]
 
 
+def test_carte_storage_is_shared_across_tenants(client):
+    http, storage, tmp_path = client
+    with http.application.test_request_context("/kansai/carte"):
+        from flask import g
+        g.tenant = "kansai"
+        storage.save_json("carte:progress", [{"user_id": "shared"}])
+    with http.application.test_request_context("/kanto/carte"):
+        from flask import g
+        g.tenant = "kanto"
+        assert storage.load_json("carte:progress") == [{"user_id": "shared"}]
+
+    assert (Path(tmp_path) / "kanto_carte_progress.json").exists()
+
+
 def test_unknown_tenant_is_rejected(client):
     http, _, _ = client
     assert http.post("/webhook/unknown").status_code == 404

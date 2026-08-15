@@ -90,6 +90,36 @@ def _prefs():
     return load_json("carte:prefs", default={})
 
 
+def _carte_members():
+    """共通カルテ専用の生徒名簿。地域別の日程調整名簿とは混ぜない。"""
+    members = load_json("carte:members", default=[])
+    # 初回だけ、既存の関東カルテが使っていた kanto:members を引き継ぐ。
+    from tenant_config import get_tenant
+    if get_tenant().name == "kanto":
+        known = {m.get("user_id") for m in members}
+        changed = False
+        for member in load_json("members", default=[]):
+            if member.get("user_id") not in known:
+                members.append(member)
+                known.add(member.get("user_id"))
+                changed = True
+        if changed:
+            save_json("carte:members", members)
+    return members
+
+
+def _upsert_carte_member(user_id, display_name):
+    members = _carte_members()
+    member = next((m for m in members if m.get("user_id") == user_id), None)
+    if member:
+        if member.get("display_name") != display_name:
+            member["display_name"] = display_name
+            save_json("carte:members", members)
+        return
+    members.append({"user_id": user_id, "display_name": display_name})
+    save_json("carte:members", members)
+
+
 def _is_done(row) -> bool:
     """画面側のisDoneと同じ判定をサーバーでも使う。"""
     if row.get("lesson_done") is True:
@@ -399,7 +429,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         user_id, name = verify_liff_user(body.get("idToken", ""))
         if not user_id:
             return {"error": name}, 401
-        upsert_member(user_id, name)
+        _upsert_carte_member(user_id, name)
         # 曲は全部返し、画面側で楽器タブを切り替える。
         # 講師が設定した楽器は「最初に選ばれるタブ」として使う（固定はしない）。
         materials = load_materials()
@@ -521,7 +551,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
     @bp.get("/admin/carte/data")
     def admin_data():
         require_admin()
-        members = load_json("members", default=[])
+        members = _carte_members()
         rows = _progress()
         prefs = _prefs()
         students = []
@@ -576,7 +606,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         require_admin()
         body = request.get_json(silent=True) or {}
         user_id = str(body.get("user_id") or "")
-        member = next((m for m in load_json("members", default=[]) if m.get("user_id") == user_id), None)
+        member = next((m for m in _carte_members() if m.get("user_id") == user_id), None)
         if not member:
             return {"error": "生徒が見つかりません。"}, 404
         try:
@@ -594,7 +624,7 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
         require_admin()
         body = request.get_json(silent=True) or {}
         user_id = str(body.get("user_id") or "")
-        if not any(m.get("user_id") == user_id for m in load_json("members", default=[])):
+        if not any(m.get("user_id") == user_id for m in _carte_members()):
             return {"error": "生徒が見つかりません。"}, 404
         instrument = str(body.get("instrument") or "").strip()
         if instrument not in {"", "ウクレレ", "ギター"}:

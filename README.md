@@ -10,7 +10,8 @@
 - 関東カルテ: `https://<service>.onrender.com/kanto/carte`
 
 環境変数は `.env.example` のとおり `KANSAI_` / `KANTO_` で分けます。共有するUpstashでは、
-関西は既存のprefixなし、関東は従来どおり `kanto:` prefixを使用するため、既存データを移行せずに利用できます。
+日程調整は関西が既存のprefixなし、関東が `kanto:` prefixで完全に分離されます。
+カルテだけは `CARTE_STORAGE_PREFIX=kanto:` の共通領域を使い、既存の関東カルテデータを移行せず両地域で共有します。
 
 移行中に現在の2サービスへ同じコードがデプロイされても動作を維持できるよう、従来の単一地域用環境変数と
 `/webhook` も互換用に残しています。統合先の動作確認後に、新しい地域別URLへ切り替えてください。
