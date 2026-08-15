@@ -46,6 +46,21 @@ def test_feature_routes_are_tenant_scoped(client):
     assert http.get("/kanto/carte").status_code == 200
 
 
+def test_carte_pages_embed_youtube_videos(client):
+    http, _, _ = client
+    student_html = http.get("/kanto/carte").get_data(as_text=True)
+
+    import carte
+
+    for html in (student_html, carte.ADMIN_HTML):
+        assert 'id="videoDialog"' in html
+        assert 'id="videoFrame"' in html
+        assert "function youtubeId(url)" in html
+        assert "www.youtube-nocookie.com/embed/" in html
+        assert "playVideo(event,this.dataset.video)" in html
+        assert "再生できない場合はYouTubeで開く" in html
+
+
 def test_admin_page_keeps_tenant_in_links(client):
     http, _, _ = client
     response = http.get("/kansai/admin/panel?token=kansai-admin")
