@@ -1131,8 +1131,15 @@ loadMembers();
 
 @app.route("/healthz", methods=["GET", "HEAD"])
 def healthz():
-    """スリープ防止のping用。外部から定期的に叩いてサーバーを起こしたままにする。
-    処理は文字列を返すだけなので、Upstashへのアクセスもログ出力も発生しない。"""
+    """Keepalive endpoint and lightweight scheduler for automatic reminders."""
+    if request.method == "GET":
+        try:
+            from lesson_operations import run_due_automations
+
+            run_due_automations(push_text_message)
+        except Exception:
+            # A reminder/storage failure must never make Render mark the app unhealthy.
+            pass
     return "ok", 200
 
 

@@ -30,7 +30,8 @@ _failed_logins = defaultdict(list)
 
 
 def _notice_redirect(path: str, message: str):
-    return redirect(path + "?" + urlencode({"notice": message}))
+    separator = "&" if "?" in path else "?"
+    return redirect(path + separator + urlencode({"notice": message}))
 
 
 BASE_STYLE = """
@@ -43,7 +44,7 @@ BASE_STYLE += """
 
 LOGIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ログイン</title><style>{{style}}body{min-height:100vh;display:grid;place-items:center}.box{width:min(420px,calc(100% - 30px));background:#fff;border:1px solid #dfe3e6;border-radius:12px;padding:28px}.box h1{font-size:22px;margin:0 0 8px}</style></head><body><main class="box"><h1>講師ログイン</h1><p class="muted">日程調整・共通カルテ・曲リストを1つの画面から管理します。</p>{% if error %}<div class="error" style="margin-top:16px">{{error}}</div>{% endif %}<form method="post" action="/admin/login"><label for="password">管理用の合言葉</label><input id="password" name="password" type="password" autocomplete="current-password" autofocus required><button type="submit" style="width:100%;margin-top:16px">ログイン</button></form></main></body></html>"""
 
-HOME_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ホーム</title><style>{{style}}</style></head><body><header><h1>講師ホーム</h1><form method="post" action="/admin/logout"><button class="sub">ログアウト</button></form></header><main><div class="stats"><div class="stat"><b>{{dashboard.carte.students}}</b><span>カルテ生徒</span></div><div class="stat"><b>{{dashboard.carte.next_students}}</b><span>次回曲あり</span></div><div class="stat"><b>{{dashboard.carte.open_requests}}</b><span>未対応リクエスト</span></div><div class="stat"><b>{{dashboard.carte.completed}}</b><span>実施記録</span></div></div><div class="grid">{% for name,s in dashboard.schedules.items() %}<a class="card" href="/{{name}}/admin/panel"><span class="tag">{{s.label}}</span><h2>日程調整</h2><p>回答 {{s.responded}}/{{s.members}}人 ・ 未回答 {{s.nonrespondents}}人<br>候補 {{s.candidate_count}}件 ・ 確定 {{s.assignment_count}}枠</p></a><a class="card" href="/admin/reminders/{{name}}"><span class="tag">{{s.label}} LINE</span><h2>リマインド</h2><p>未回答者だけ、または明日の生徒だけに確認を送信</p></a>{% endfor %}<a class="card" href="/kanto/admin/carte"><span class="tag">共通</span><h2>生徒カルテ</h2><p>実施状況、やりたい曲、次回曲、生徒メモ</p></a><a class="card" href="/kanto/admin/carte/next"><span class="tag">LINE</span><h2>次回レッスンまとめ</h2><p>生徒ごとの次回曲を確認してLINEに送信</p></a><a class="card" href="/admin/songs"><span class="tag">曲リスト</span><h2>曲の管理</h2><p>追加、編集、非公開化、リクエストから登録</p></a><a class="card" href="/admin/calendar"><span class="tag">自動同期</span><h2>Googleカレンダー</h2><p>関西・関東を別カレンダーへ登録し、変更・キャンセルも反映</p></a><a class="card" href="/admin/maintenance"><span class="tag">安全管理</span><h2>状態確認・バックアップ</h2><p>状態確認、保存、過去データへの復元</p></a></div>{% if dashboard.upcoming %}<h2 class="section-title">これからのレッスン</h2><table class="small-table"><tr><th>地域</th><th>日時</th><th>生徒</th></tr>{% for item in dashboard.upcoming %}<tr><td><span class="tag">{{item.label}}</span></td><td>{{item.day}} {{item.time}}〜{{item.end}}</td><td>{{item.name}}</td></tr>{% endfor %}</table>{% endif %}</main></body></html>"""
+HOME_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>講師ホーム</title><style>{{style}}</style></head><body><header><h1>講師ホーム</h1><form method="post" action="/admin/logout"><button class="sub">ログアウト</button></form></header><main><div class="stats"><div class="stat"><b>{{dashboard.carte.students}}</b><span>カルテ生徒</span></div><div class="stat"><b>{{dashboard.carte.next_students}}</b><span>次回曲あり</span></div><div class="stat"><b>{{dashboard.carte.open_requests}}</b><span>未対応リクエスト</span></div><div class="stat"><b>{{dashboard.carte.completed}}</b><span>実施記録</span></div></div><div class="grid">{% for name,s in dashboard.schedules.items() %}<a class="card" href="/{{name}}/admin/panel"><span class="tag">{{s.label}}</span><h2>日程調整</h2><p>回答 {{s.responded}}/{{s.members}}人 ・ 未回答 {{s.nonrespondents}}人<br>候補 {{s.candidate_count}}件 ・ 確定 {{s.assignment_count}}枠</p></a><a class="card" href="/admin/reminders/{{name}}"><span class="tag">{{s.label}} LINE</span><h2>リマインド</h2><p>未回答者だけ、または明日の生徒だけに確認を送信</p></a>{% endfor %}<a class="card" href="/admin/automations"><span class="tag">自動LINE</span><h2>自動通知の設定</h2><p>未回答と前日確認を、設定時刻に自動送信</p></a><a class="card" href="/admin/lessons"><span class="tag">日程管理</span><h2>変更・キャンセル</h2><p>確定レッスンを変更し、生徒へのLINEとカレンダーへ反映</p></a><a class="card" href="/admin/attendance"><span class="tag">共通</span><h2>出欠・月謝</h2><p>月ごとの出席回数、欠席、月謝の入金状況を管理</p></a><a class="card" href="/kanto/admin/carte"><span class="tag">共通</span><h2>生徒カルテ</h2><p>実施状況、やりたい曲、次回曲、生徒メモ</p></a><a class="card" href="/kanto/admin/carte/next"><span class="tag">LINE</span><h2>次回レッスンまとめ</h2><p>生徒ごとの次回曲を確認してLINEに送信</p></a><a class="card" href="/admin/songs"><span class="tag">曲リスト</span><h2>曲の管理</h2><p>追加、編集、非公開化、リクエストから登録</p></a><a class="card" href="/admin/calendar"><span class="tag">自動同期</span><h2>Googleカレンダー</h2><p>関西・関東を別カレンダーへ登録し、変更・キャンセルも反映</p></a><a class="card" href="/admin/maintenance"><span class="tag">安全管理</span><h2>状態確認・バックアップ</h2><p>状態確認、保存、過去データへの復元</p></a></div>{% if dashboard.upcoming %}<h2 class="section-title">これからのレッスン</h2><table class="small-table"><tr><th>地域</th><th>日時</th><th>生徒</th></tr>{% for item in dashboard.upcoming %}<tr><td><span class="tag">{{item.label}}</span></td><td>{{item.day}} {{item.time}}〜{{item.end}}</td><td>{{item.name}}</td></tr>{% endfor %}</table>{% endif %}</main></body></html>"""
 
 SONGS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>曲の管理</title><style>{{style}}</style></head><body><header><h1>曲の管理</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}{% if error %}<div class="error">{{error}}</div>{% endif %}{% if request_item %}<div class="warning">「{{request_item.title}}」のリクエスト内容を入力しました。登録すると自動で「追加済み」になります。</div>{% endif %}<form class="form" method="post" action="/admin/songs"><input type="hidden" name="material_id" value="{{values.get('material_id','')}}"><input type="hidden" name="request_id" value="{{values.get('request_id','')}}"><h2 style="font-size:17px;margin:0">{{'曲を編集' if values.get('material_id') else '新しい曲を追加'}}</h2><p class="muted" style="margin-top:7px">同じ曲名または動画URLがある場合は保存しません。非公開にしてもIDと過去カルテは残ります。</p><label for="title">曲名</label><input id="title" name="title" maxlength="120" value="{{values.get('title','')}}" required><div class="row"><div><label for="instrument">楽器</label><select id="instrument" name="instrument"><option value="">未設定</option>{% for v in ['ウクレレ','ギター'] %}<option value="{{v}}"{% if values.get('instrument')==v %} selected{% endif %}>{{v}}</option>{% endfor %}</select></div><div><label for="kind">形態</label><select id="kind" name="kind"><option value="">未設定</option>{% for v in ['弾き語り','ソロ弾き','メロ弾き','デュオ'] %}<option value="{{v}}"{% if values.get('kind')==v %} selected{% endif %}>{{v}}</option>{% endfor %}</select></div></div><label for="artist">アーティスト</label><input id="artist" name="artist" maxlength="120" value="{{values.get('artist','')}}"><label for="video">YouTube URL</label><input id="video" name="video" type="url" maxlength="500" value="{{values.get('video','')}}" placeholder="https://youtu.be/..."><div class="row"><div><label for="genre">ジャンル</label><input id="genre" name="genre" maxlength="80" value="{{values.get('genre','')}}"></div><div><label for="note">メモ</label><input id="note" name="note" maxlength="500" value="{{values.get('note','')}}"></div></div><div class="actions"><button type="submit">{{'変更を保存' if values.get('material_id') else '曲を追加する'}}</button>{% if values.get('material_id') %}<a class="button sub" href="/admin/songs">編集をやめる</a>{% endif %}<a class="button sub" href="/kanto/admin/carte">カルテを開く</a></div></form><h2 class="section-title">登録曲（{{materials|length}}曲）</h2><input id="songSearch" placeholder="曲名・アーティストで絞り込み" oninput="filterSongs()" style="max-width:420px;margin-bottom:10px"><table class="small-table" id="songTable"><tr><th>ID</th><th>曲</th><th>分類</th><th>公開</th><th>操作</th></tr>{% for item in materials %}<tr data-search="{{(item.title+' '+item.artist)|lower}}"><td>{{item.id}}</td><td><b>{{item.title}}</b>{% if item.artist %}<br><span class="muted">{{item.artist}}</span>{% endif %}</td><td>{{item.instrument}} {{item.kind}}{% if item.genre %}<br><span class="muted">{{item.genre}}</span>{% endif %}</td><td><span class="pill {{'on' if item.active else 'off'}}">{{'公開' if item.active else '非公開'}}</span></td><td><a class="button sub" href="/admin/songs?edit_id={{item.id}}">編集</a> <form class="inline" method="post" action="/admin/songs/visibility" onsubmit="return confirm('{{item.title}}を{{'非公開' if item.active else '再公開'}}にしますか？')"><input type="hidden" name="material_id" value="{{item.id}}"><input type="hidden" name="action" value="{{'archive' if item.active else 'publish'}}"><button class="{{'danger' if item.active else ''}}">{{'非公開' if item.active else '再公開'}}</button></form></td></tr>{% endfor %}</table><script>function filterSongs(){let q=songSearch.value.toLowerCase();songTable.querySelectorAll('tr[data-search]').forEach(r=>r.hidden=!r.dataset.search.includes(q))}</script></main></body></html>"""
 
@@ -51,9 +52,15 @@ MAINTENANCE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"
 
 RESTORE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>バックアップ復元</title><style>{{style}}</style></head><body><header><h1>バックアップ復元</h1><a href="/admin/maintenance">戻る</a></header><main><div class="warning"><b>{{snapshot.created_at}}</b> の状態へ戻します。現在の状態は実行直前に自動保存されます。</div><div class="card"><p>関西メンバー {{snapshot.kansai_members}}人<br>関東メンバー {{snapshot.kanto_members}}人<br>カルテ記録 {{snapshot.carte_progress}}件</p><form method="post"><button class="danger" onclick="return confirm('このバックアップへ復元しますか？')">この状態へ復元する</button> <a class="button sub" href="/admin/maintenance">キャンセル</a></form></div></main></body></html>"""
 
-REMINDERS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{label}} リマインド</title><style>{{style}}</style></head><body><header><h1>{{label}} リマインド</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<p class="muted">対象者と本文を確認してから送信します。ボタンを押すまでLINEは送られません。</p>{% for preview in previews %}<section class="card" style="margin-top:14px"><h2>{{preview.label}}（{{preview.targets|length}}人）</h2>{% if preview.targets %}{% for target in preview.targets %}<div class="target"><b>{{target.display_name or '名前未登録'}}</b><pre>{{target.text}}</pre></div>{% endfor %}<form method="post" action="/admin/reminders/{{tenant}}/{{preview.kind}}" onsubmit="return confirm('{{preview.targets|length}}人に送信しますか？')"><button>{{preview.targets|length}}人にLINE送信</button></form>{% else %}<p class="muted">現在、送信対象はいません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
+REMINDERS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{label}} リマインド</title><style>{{style}}</style></head><body><header><h1>{{label}} リマインド</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<p class="muted">現在の対象者と本文です。自動通知は設定時刻に送られ、必要なときはここから手動送信もできます。</p>{% for preview in previews %}<section class="card" style="margin-top:14px"><h2>{{preview.label}}（{{preview.targets|length}}人）</h2>{% if preview.targets %}{% for target in preview.targets %}<div class="target"><b>{{target.display_name or '名前未登録'}}</b><pre>{{target.text}}</pre></div>{% endfor %}<form method="post" action="/admin/reminders/{{tenant}}/{{preview.kind}}" onsubmit="return confirm('{{preview.targets|length}}人に送信しますか？')"><button>{{preview.targets|length}}人に今すぐLINE送信</button></form>{% else %}<p class="muted">現在、送信対象はいません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
 
 CALENDAR_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Googleカレンダー</title><style>{{style}}</style></head><body><header><h1>Googleカレンダー</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<p class="muted">確定した日程を地域別カレンダーへ同期します。日程を確定・変更したときは自動同期され、ここから再同期もできます。</p><div class="grid" style="margin-top:16px">{% for item in statuses %}<section class="card"><span class="tag">{{item.label}}</span><h2>{{item.calendar_name}}</h2>{% if not item.configured %}<div class="error">連携設定がまだありません。</div>{% else %}<p>今後の確定 {{item.event_count}}件<br>同期済み {{item.synced_count}}件 ・ 未反映 {{item.pending_count}}件</p>{% if item.last_synced_at %}<p class="muted" style="margin-top:8px">最終同期: {{item.last_synced_at[:16].replace('T',' ')}}</p>{% endif %}{% if item.last_error %}<div class="error" style="margin-top:10px">前回エラー: {{item.last_error}}</div>{% endif %}<form method="post" action="/admin/calendar/{{item.tenant}}" style="margin-top:14px" onsubmit="return confirm('{{item.label}}の日程をGoogleカレンダーへ同期しますか？')"><button>{{item.label}}を今すぐ同期</button></form>{% endif %}</section>{% endfor %}</div><div class="warning" style="margin-top:16px">このアプリが作成した予定だけを更新・削除します。カレンダーに手入力した予定には触れません。</div></main></body></html>"""
+
+AUTOMATIONS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>自動通知</title><style>{{style}}</style></head><body><header><h1>自動通知</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<p class="muted">起動維持の定期確認を利用して送信します。同じ対象・同じ回の通知は二重送信しません。</p><div class="grid" style="margin-top:16px">{% for item in statuses %}<section class="card"><span class="tag">{{item.label}}</span><h2>{{item.label}}の設定</h2><form method="post" action="/admin/automations/{{item.tenant}}"><label><input type="checkbox" name="unanswered_enabled" value="1"{% if item.settings.unanswered_enabled %} checked{% endif %} style="width:auto;height:auto"> 未回答者へ自動送信</label><label>送信時刻（回答期限の24時間前から）</label><input type="time" name="unanswered_time" value="{{item.settings.unanswered_time}}"><label><input type="checkbox" name="tomorrow_enabled" value="1"{% if item.settings.tomorrow_enabled %} checked{% endif %} style="width:auto;height:auto"> 前日確認を自動送信</label><label>送信時刻</label><input type="time" name="tomorrow_time" value="{{item.settings.tomorrow_time}}"><div class="actions"><button>設定を保存</button></div></form>{% if item.last_run %}<p class="muted" style="margin-top:14px">最終処理: {{(item.last_run.completed_at or item.last_run.started_at or '')[:16].replace('T',' ')}} / {{item.last_run.count or 0}}人{% if item.last_run.last_error %}<br>エラー: {{item.last_run.last_error}}{% endif %}</p>{% else %}<p class="muted" style="margin-top:14px">自動送信の履歴はまだありません。</p>{% endif %}</section>{% endfor %}</div></main></body></html>"""
+
+LESSONS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>レッスン変更・キャンセル</title><style>{{style}}</style></head><body><header><h1>レッスン変更・キャンセル</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<p class="muted">変更後はGoogleカレンダーへ自動反映します。「生徒へLINE通知」を外すと、LINEを送らずに保存できます。</p>{% if lessons %}{% for item in lessons %}<section class="card" style="margin-top:14px"><span class="tag">{{item.label}}</span><h2>{{item.name or '名前未登録'}}</h2><form method="post" action="/admin/lessons/update"><input type="hidden" name="tenant" value="{{item.tenant}}"><input type="hidden" name="lesson_id" value="{{item.lesson_id}}"><div class="row"><div><label>日付</label><input type="date" name="day" value="{{item.date_value}}" required></div><div><label>教室</label><input name="location" value="{{item.location}}" maxlength="120"></div></div><div class="row"><div><label>開始</label><input type="time" name="time" value="{{item.time}}" required></div><div><label>終了</label><input type="time" name="end" value="{{item.end}}" required></div></div><label><input type="checkbox" name="notify" value="1" checked style="width:auto;height:auto"> 生徒へ変更内容をLINE通知</label><div class="actions"><button>変更を保存</button></div></form><form method="post" action="/admin/lessons/cancel" style="margin-top:10px" onsubmit="return confirm('{{item.name}}さんの {{item.date_value}} {{item.time}} のレッスンをキャンセルしますか？')"><input type="hidden" name="tenant" value="{{item.tenant}}"><input type="hidden" name="lesson_id" value="{{item.lesson_id}}"><label><input type="checkbox" name="notify" value="1" checked style="width:auto;height:auto"> 生徒へキャンセルをLINE通知</label><button class="danger">この回をキャンセル</button></form></section>{% endfor %}{% else %}<div class="card" style="margin-top:16px"><p class="muted">今後の確定レッスンはありません。</p></div>{% endif %}</main></body></html>"""
+
+ATTENDANCE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>出欠・月謝</title><style>{{style}}</style></head><body><header><h1>出欠・月謝</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<form method="get" action="/admin/attendance" class="form"><label>表示する月</label><div class="row"><input type="month" name="month" value="{{data.month}}"><button>この月を表示</button></div></form><h2 class="section-title">月間まとめ</h2><div class="grid">{% for student in data.students %}<section class="card"><h2>{{student.display_name}}</h2><p>出席 {{student.counts.attended}}回 / 予定 {{student.counts.scheduled}}回 / 欠席 {{student.counts.absent}}回 / キャンセル {{student.counts.cancelled}}回</p><form method="post" action="/admin/attendance/tuition"><input type="hidden" name="month" value="{{data.month}}"><input type="hidden" name="user_id" value="{{student.user_id}}"><label>月謝</label><input type="number" name="amount" min="0" value="{{student.amount}}"><label><input type="checkbox" name="paid" value="1"{% if student.paid %} checked{% endif %} style="width:auto;height:auto"> 入金済み</label><label>月謝メモ</label><input name="note" value="{{student.note}}" maxlength="500"><div class="actions"><button>月謝を保存</button></div></form></section>{% endfor %}</div><h2 class="section-title">レッスンごとの出欠</h2>{% if data.rows %}<table class="small-table"><tr><th>日時</th><th>地域・生徒</th><th>出欠・メモ</th></tr>{% for row in data.rows %}<tr><td>{{row.date_value}}<br>{{row.time}}〜{{row.end}}</td><td><span class="tag">{{row.label}}</span><br><b>{{row.display_name}}</b>{% if row.location %}<br><span class="muted">{{row.location}}</span>{% endif %}</td><td><form method="post" action="/admin/attendance/record"><input type="hidden" name="month" value="{{data.month}}"><input type="hidden" name="record_id" value="{{row.id}}"><select name="status">{% for key,label in data.statuses.items() %}<option value="{{key}}"{% if row.status==key %} selected{% endif %}>{{label}}</option>{% endfor %}</select><input name="note" value="{{row.note}}" maxlength="500" placeholder="メモ（任意）" style="margin-top:6px"><button style="margin-top:6px">保存</button></form></td></tr>{% endfor %}</table>{% else %}<div class="card"><p class="muted">この月のレッスン記録はありません。</p></div>{% endif %}</main></body></html>"""
 
 
 def create_admin_portal_blueprint():
@@ -334,6 +341,147 @@ def create_admin_portal_blueprint():
             f"/admin/reminders/{tenant}",
             message,
         )
+
+    @bp.get("/admin/automations")
+    @teacher_only
+    def automations_page():
+        from lesson_operations import TENANT_NAMES, automation_status
+
+        return render_template_string(
+            AUTOMATIONS_HTML,
+            style=BASE_STYLE,
+            statuses=[automation_status(name) for name in TENANT_NAMES],
+            notice=request.args.get("notice", ""),
+        )
+
+    @bp.post("/admin/automations/<tenant>")
+    @teacher_only
+    def automations_save(tenant):
+        from lesson_operations import TENANT_LABELS, save_automation_settings
+
+        if tenant not in TENANT_LABELS:
+            abort(404)
+        try:
+            save_automation_settings(tenant, request.form)
+            message = f"{TENANT_LABELS[tenant]}の自動通知設定を保存しました。"
+        except ValueError as exc:
+            message = str(exc)
+        return _notice_redirect("/admin/automations", message)
+
+    @bp.get("/admin/lessons")
+    @teacher_only
+    def lessons_page():
+        from lesson_operations import lessons_data
+
+        return render_template_string(
+            LESSONS_HTML,
+            style=BASE_STYLE,
+            lessons=lessons_data(),
+            notice=request.args.get("notice", ""),
+        )
+
+    @bp.post("/admin/lessons/update")
+    @teacher_only
+    def lesson_update():
+        from app import push_text_message
+        from lesson_operations import TENANT_LABELS, update_lesson
+
+        tenant = str(request.form.get("tenant") or "")
+        if tenant not in TENANT_LABELS:
+            abort(404)
+        try:
+            result = update_lesson(
+                tenant,
+                str(request.form.get("lesson_id") or ""),
+                request.form,
+                push_text=push_text_message,
+                notify=bool(request.form.get("notify")),
+            )
+            message = f"{TENANT_LABELS[tenant]}のレッスンを変更しました。"
+            if request.form.get("notify"):
+                message += f" LINEは{result['sent']}人へ送信しました。"
+            if result.get("error"):
+                message += f" LINE送信エラー: {result['error']}"
+            if result["calendar"].get("configured") and not result["calendar"].get("ok"):
+                message += " Googleカレンダーは未反映です。"
+        except ValueError as exc:
+            message = f"保存できませんでした: {exc}"
+        return _notice_redirect("/admin/lessons", message)
+
+    @bp.post("/admin/lessons/cancel")
+    @teacher_only
+    def lesson_cancel():
+        from app import push_text_message
+        from lesson_operations import TENANT_LABELS, cancel_lesson
+
+        tenant = str(request.form.get("tenant") or "")
+        if tenant not in TENANT_LABELS:
+            abort(404)
+        try:
+            result = cancel_lesson(
+                tenant,
+                str(request.form.get("lesson_id") or ""),
+                push_text=push_text_message,
+                notify=bool(request.form.get("notify")),
+            )
+            message = f"{TENANT_LABELS[tenant]}のレッスンをキャンセルしました。"
+            if request.form.get("notify"):
+                message += f" LINEは{result['sent']}人へ送信しました。"
+            if result.get("error"):
+                message += f" LINE送信エラー: {result['error']}"
+            if result["calendar"].get("configured") and not result["calendar"].get("ok"):
+                message += " Googleカレンダーは未反映です。"
+        except ValueError as exc:
+            message = f"キャンセルできませんでした: {exc}"
+        return _notice_redirect("/admin/lessons", message)
+
+    @bp.get("/admin/attendance")
+    @teacher_only
+    def attendance_page():
+        from lesson_operations import attendance_month_data
+
+        return render_template_string(
+            ATTENDANCE_HTML,
+            style=BASE_STYLE,
+            data=attendance_month_data(request.args.get("month", "")),
+            notice=request.args.get("notice", ""),
+        )
+
+    @bp.post("/admin/attendance/record")
+    @teacher_only
+    def attendance_record():
+        from lesson_operations import update_attendance_record
+
+        month = str(request.form.get("month") or "")
+        try:
+            update_attendance_record(
+                str(request.form.get("record_id") or ""),
+                str(request.form.get("status") or ""),
+                str(request.form.get("note") or ""),
+            )
+            message = "出欠を保存しました。"
+        except ValueError as exc:
+            message = str(exc)
+        return _notice_redirect(f"/admin/attendance?month={month}", message)
+
+    @bp.post("/admin/attendance/tuition")
+    @teacher_only
+    def attendance_tuition():
+        from lesson_operations import save_tuition_record
+
+        month = str(request.form.get("month") or "")
+        try:
+            save_tuition_record(
+                str(request.form.get("user_id") or ""),
+                month,
+                request.form.get("amount", "0"),
+                bool(request.form.get("paid")),
+                str(request.form.get("note") or ""),
+            )
+            message = "月謝を保存しました。"
+        except ValueError as exc:
+            message = str(exc)
+        return _notice_redirect(f"/admin/attendance?month={month}", message)
 
     @bp.post("/admin/maintenance/keepalive")
     @teacher_only

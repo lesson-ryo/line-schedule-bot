@@ -601,3 +601,132 @@ def test_calendar_sync_deletes_removed_future_events(client, monkeypatch):
     assert result["ok"] is True
     assert result["deleted"] == 1
     assert sent["payload"]["delete_event_ids"] == ["old-event"]
+
+
+def test_teacher_can_open_new_management_pages(client):
+    http, _, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+    for path, label in (
+        ("/admin/automations", "自動通知"),
+        ("/admin/lessons", "変更・キャンセル"),
+        ("/admin/attendance?month=2026-08", "出欠・月謝"),
+    ):
+        response = http.get(path, **secure)
+        assert response.status_code == 200
+        assert label in response.get_data(as_text=True)
+
+
+def test_automatic_tomorrow_reminder_is_not_sent_twice(client):
+    _, storage, _ = client
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import lesson_operations
+
+    with lesson_operations.tenant_scope("kansai"):
+        storage.save_json(
+            "members", [{"user_id": "student-1", "display_name": "生徒A"}]
+        )
+        storage.save_json(
+            "assignment",
+            [{
+                "day": "2026-08-17",
+                "time": "13:00",
+                "end": "14:00",
+                "name": "生徒A",
+                "member_ids": ["student-1"],
+            }],
+        )
+    sent = []
+    now = datetime(2026, 8, 16, 18, 5, tzinfo=ZoneInfo("Asia/Tokyo"))
+    lesson_operations.run_due_automations(lambda uid, text: sent.append((uid, text)), now=now)
+    lesson_operations.run_due_automations(lambda uid, text: sent.append((uid, text)), now=now)
+    assert [uid for uid, _ in sent] == ["student-1"]
+    assert "明日のレッスン" in sent[0][1]
+
+
+def test_lesson_reschedule_updates_attendance_and_cancel_keeps_history(client):
+    _, storage, _ = client
+    import lesson_operations
+
+    with lesson_operations.tenant_scope("kansai"):
+        storage.save_json(
+            "members", [{"user_id": "student-1", "display_name": "生徒A"}]
+        )
+        storage.save_json(
+            "assignment",
+            [{
+                "day": "2099-08-20",
+                "time": "13:00",
+                "end": "14:00",
+                "name": "生徒A",
+                "location": "梅田",
+                "member_ids": ["student-1"],
+            }],
+        )
+    lesson_id = lesson_operations.ensure_lesson_ids("kansai")[0]["lesson_id"]
+    result = lesson_operations.update_lesson(
+        "kansai",
+        lesson_id,
+        {"day": "2099-08-21", "time": "14:00", "end": "15:00", "location": "難波"},
+        notify=False,
+    )
+    assert result["ok"] is True
+    with lesson_operations.tenant_scope("kansai"):
+        assert storage.load_json("assignment")[0]["day"] == "2099-08-21"
+    with lesson_operations.tenant_scope("kanto"):
+        attendance = storage.load_json("carte:attendance")
+    assert attendance[0]["day"] == "2099-08-21"
+    lesson_operations.cancel_lesson("kansai", lesson_id, notify=False)
+    with lesson_operations.tenant_scope("kansai"):
+        assert storage.load_json("assignment") == []
+    with lesson_operations.tenant_scope("kanto"):
+        assert storage.load_json("carte:attendance")[0]["status"] == "cancelled"
+
+
+def test_tuition_and_student_home_data_are_shared(client):
+    _, storage, _ = client
+    import carte
+    import lesson_operations
+
+    with lesson_operations.tenant_scope("kansai"):
+        storage.save_json(
+            "assignment",
+            [{
+                "day": "2099-09-01",
+                "time": "10:00",
+                "end": "11:00",
+                "location": "梅田",
+                "name": "生徒A",
+                "member_ids": ["student-1"],
+            }],
+        )
+    progress = [{
+        "user_id": "student-1",
+        "material_id": 10,
+        "next_lesson": True,
+        "teacher_note": "サビをゆっくり練習しましょう",
+    }]
+    home = carte._student_home(
+        "student-1", [{"id": 10, "title": "次回の曲", "artist": "歌手"}], progress
+    )
+    assert home["next_lesson"]["label"] == "関西"
+    assert home["next_songs"][0]["title"] == "次回の曲"
+    assert "ゆっくり" in home["teacher_notes"][0]
+
+    saved = lesson_operations.save_tuition_record(
+        "student-1", "2099-09", 12000, True, "振込"
+    )
+    assert saved["amount"] == 12000
+    assert saved["paid"] is True
+
+
+def test_carte_pages_include_home_card_and_teacher_note_editor(client):
+    http, _, _ = client
+    student_html = http.get("/kanto/carte").get_data(as_text=True)
+    assert 'id="home"' in student_html
+    assert "function renderHome(data)" in student_html
+    import carte
+
+    assert 'id="teacherNote"' in carte.ADMIN_HTML
+    assert "teacher_note:teacherNote.value" in carte.ADMIN_HTML

@@ -26,6 +26,8 @@ SCHEDULE_KEYS = (
     "reminders",
     "schedule_targets",
     "calendar_sync",
+    "automation_settings",
+    "automation_runs",
 )
 CARTE_KEYS = (
     "carte:progress",
@@ -36,10 +38,20 @@ CARTE_KEYS = (
     "carte:custom_materials",
     "carte:notifications",
     "carte:material_history",
+    "carte:attendance",
+    "carte:tuition",
 )
 MAX_SNAPSHOTS = 14
 
-DICT_KEYS = {"quotas", "groups", "reset_backup", "calendar_sync", "carte:prefs"}
+DICT_KEYS = {
+    "quotas",
+    "groups",
+    "reset_backup",
+    "calendar_sync",
+    "automation_settings",
+    "automation_runs",
+    "carte:prefs",
+}
 TEXT_KEYS = {"deadline", "comment_label", "notify_message"}
 
 
