@@ -1,5 +1,20 @@
 # LINE公式アカウント 日程調整Bot（LIFFチェックボックス投票版）
 
+## 関西・関東の1サービス統合
+
+1つのRender Web Serviceで、2つのLINE公式アカウントをtenantとして処理できます。
+
+- 関西Webhook: `https://<service>.onrender.com/webhook/kansai`
+- 関東Webhook: `https://<service>.onrender.com/webhook/kanto`
+- 関西管理画面: `https://<service>.onrender.com/kansai/admin/panel?token=...`
+- 関東カルテ: `https://<service>.onrender.com/kanto/carte`
+
+環境変数は `.env.example` のとおり `KANSAI_` / `KANTO_` で分けます。共有するUpstashでは、
+関西は既存のprefixなし、関東は従来どおり `kanto:` prefixを使用するため、既存データを移行せずに利用できます。
+
+移行中に現在の2サービスへ同じコードがデプロイされても動作を維持できるよう、従来の単一地域用環境変数と
+`/webhook` も互換用に残しています。統合先の動作確認後に、新しい地域別URLへ切り替えてください。
+
 LINE公式アカウントの友だち（メンバー）に日程候補を送ると、メンバーはLINEアプリ内で開くミニWebページ（LIFF）上でチェックボックスから複数選択して回答できるBotです。候補数に上限は実質なく（LINEのFlex Messageの50KB制限内であればOK）、集計は構造化データを読むだけなので自由記述の解釈ミスもありません。
 
 想定人数50人程度であれば、以下の構成はすべて無料枠に収まります。

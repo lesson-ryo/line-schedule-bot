@@ -24,7 +24,6 @@ import requests
 
 UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-PREFIX = os.environ.get("STORAGE_PREFIX", "")
 
 BASE_DIR = Path(__file__).parent
 
@@ -34,8 +33,11 @@ def _using_upstash() -> bool:
 
 
 def _key(key: str) -> str:
-    """STORAGE_PREFIXが設定されていれば付与する（Bot間でデータを分離するため）"""
-    return f"{PREFIX}{key}" if PREFIX else key
+    """現在のtenantの接頭辞を付け、地域間のデータ混入を防ぐ。"""
+    from tenant_config import get_tenant
+
+    prefix = get_tenant().storage_prefix
+    return f"{prefix}{key}" if prefix else key
 
 
 def _redis_command(*args):

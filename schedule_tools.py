@@ -37,15 +37,19 @@ from linebot.v3.messaging import (
 )
 
 from storage import load_json, save_json
+from tenant_config import get_tenant
+from werkzeug.local import LocalProxy
 
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
-LIFF_ID = os.environ.get("LIFF_ID", "")
+CHANNEL_ACCESS_TOKEN = LocalProxy(lambda: get_tenant().channel_access_token)
+LIFF_ID = LocalProxy(lambda: get_tenant().liff_id)
 
 # 候補数がこれを超えたら、ボタン1つずつのFlex Messageではなく
 # LIFF(チェックボックスフォーム)へのリンクを送る。0にすると常にLIFFフォームを使う。
 LIFF_THRESHOLD = 0
 
-configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
+configuration = LocalProxy(
+    lambda: Configuration(access_token=get_tenant().channel_access_token)
+)
 
 
 def build_flex_contents(candidates: list[str]) -> dict:

@@ -362,23 +362,25 @@ ADMIN_LOGIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8
 
 
 def render_student_page(liff_id):
-    return STUDENT_HTML.replace("__LIFF_ID__", liff_id)
+    return STUDENT_HTML.replace("__LIFF_ID__", str(liff_id))
 
 
 def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id):
     bp = Blueprint("carte", __name__)
 
     def admin_cookie_value():
+        token = str(admin_token)
         return hmac.new(
-            admin_token.encode("utf-8"), b"carte-admin-login", hashlib.sha256
+            token.encode("utf-8"), b"carte-admin-login", hashlib.sha256
         ).hexdigest()
 
     def is_admin():
-        if not admin_token:
+        token = str(admin_token)
+        if not token:
             return False
         supplied = request.args.get("token", "")
         cookie = request.cookies.get("carte_admin", "")
-        return hmac.compare_digest(supplied, admin_token) or hmac.compare_digest(
+        return hmac.compare_digest(supplied, token) or hmac.compare_digest(
             cookie, admin_cookie_value()
         )
 
@@ -499,7 +501,8 @@ def create_carte_blueprint(verify_liff_user, upsert_member, admin_token, liff_id
     @bp.post("/admin/carte/login")
     def admin_login():
         password = request.form.get("password", "")
-        if not admin_token or not hmac.compare_digest(password, admin_token):
+        token = str(admin_token)
+        if not token or not hmac.compare_digest(password, token):
             error = '<div class="error">合言葉が違います。もう一度お試しください。</div>'
             return ADMIN_LOGIN_HTML.replace("__ERROR__", error), 401
         response = make_response(redirect("/admin/carte"))

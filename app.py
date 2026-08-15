@@ -16,7 +16,8 @@ import requests
 from datetime import datetime
 from urllib.parse import quote
 
-from flask import Flask, request, abort
+from flask import Flask, request, abort, g
+from werkzeug.local import LocalProxy
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -29,16 +30,17 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 
 from storage import load_json, save_json
+from tenant_config import DEFAULT_TENANT, TENANTS, get_tenant
 
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
-CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
-LIFF_ID = os.environ.get("LIFF_ID", "")
-LINE_CHANNEL_ID = os.environ.get("LINE_CHANNEL_ID", "")
+CHANNEL_ACCESS_TOKEN = LocalProxy(lambda: get_tenant().channel_access_token)
+CHANNEL_SECRET = LocalProxy(lambda: get_tenant().channel_secret)
+ADMIN_TOKEN = LocalProxy(lambda: get_tenant().admin_token)
+LIFF_ID = LocalProxy(lambda: get_tenant().liff_id)
+LINE_CHANNEL_ID = LocalProxy(lambda: get_tenant().line_channel_id)
 # 管理画面の見出しに表示する名前（関西用・関東用など複数運用時の見分け用）
-PANEL_NAME = os.environ.get("PANEL_NAME", "日程調整Bot")
+PANEL_NAME = LocalProxy(lambda: get_tenant().panel_name)
 # 回答フォームで選ばせる教室。「|」区切りで指定する（未設定なら教室選択は表示しない）
-LOCATIONS = [s.strip() for s in os.environ.get("LOCATIONS", "").split("|") if s.strip()]
+LOCATIONS = LocalProxy(lambda: list(get_tenant().locations))
 
 # 生徒がテキストを送ってきたときの自動返信。
 # このBotは日程調整専用なので、それ以外の連絡は本アカウントへ誘導する。
@@ -50,7 +52,7 @@ DEFAULT_AUTO_REPLY = "\n".join([
     "",
     "レッスンに関するご連絡・ご質問は、お手数ですが本アカウントまでお願いします。",
 ])
-AUTO_REPLY = os.environ.get("AUTO_REPLY", "").strip() or DEFAULT_AUTO_REPLY
+AUTO_REPLY = LocalProxy(lambda: get_tenant().auto_reply)
 
 # --- 地域ごとの機能ON/OFF -------------------------------------------------
 # 同じコードを関西・関東の両方で動かし、環境変数だけで使う機能を切り替える。
@@ -69,9 +71,9 @@ def _flag(name: str, default: bool) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-CARTE_LIFF_ID = os.environ.get("CARTE_LIFF_ID", "")
-CARTE_ENABLED = _flag("CARTE_ENABLED", bool(CARTE_LIFF_ID))
-SCHEDULE_ENABLED = _flag("SCHEDULE_ENABLED", True)
+CARTE_LIFF_ID = LocalProxy(lambda: get_tenant().carte_liff_id)
+CARTE_ENABLED = LocalProxy(lambda: get_tenant().carte_enabled)
+SCHEDULE_ENABLED = LocalProxy(lambda: get_tenant().schedule_enabled)
 
 # 日程調整をOFFにしたときに閉じるパス。カルテと共通の /healthz などは閉じない。
 SCHEDULE_PATHS = ("/liff", "/admin/panel", "/admin/members", "/admin/assign",
@@ -87,8 +89,32 @@ def format_date_ja(value: str) -> str:
         return value or ""
     return f"{d.month}/{d.day}({'月火水木金土日'[d.weekday()]})"
 
-configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
+configurations = {
+    name: Configuration(access_token=config.channel_access_token)
+    for name, config in TENANTS.items()
+}
+handlers = {
+    name: WebhookHandler(config.channel_secret)
+    for name, config in TENANTS.items()
+}
+configuration = LocalProxy(lambda: configurations[get_tenant().name])
+
+
+class _TenantHandlers:
+    """Register callbacks on every LINE channel, then dispatch per request."""
+
+    def add(self, *args, **kwargs):
+        def decorator(func):
+            for item in handlers.values():
+                item.add(*args, **kwargs)(func)
+            return func
+        return decorator
+
+    def handle(self, body, signature):
+        return handlers[get_tenant().name].handle(body, signature)
+
+
+handler = _TenantHandlers()
 
 app = Flask(__name__)
 
@@ -486,7 +512,7 @@ main().catch(e => {
 def liff_page():
     """LIFF(LINEアプリ内ブラウザ)で開くチェックボックス式の投票フォーム。
     候補数が多いとき(schedule_tools.LIFF_THRESHOLD超)はこちらへのリンクを送る。"""
-    return LIFF_PAGE_HTML.replace("__LIFF_ID__", LIFF_ID)
+    return LIFF_PAGE_HTML.replace("__LIFF_ID__", str(LIFF_ID))
 
 
 @app.route("/liff/candidates", methods=["GET"])
@@ -509,7 +535,7 @@ def verify_liff_user(id_token: str):
 
     verify_res = requests.post(
         "https://api.line.me/oauth2/v2.1/verify",
-        data={"id_token": id_token, "client_id": LINE_CHANNEL_ID},
+        data={"id_token": id_token, "client_id": str(LINE_CHANNEL_ID)},
         timeout=10,
     )
     if verify_res.status_code != 200:
@@ -626,7 +652,8 @@ def check_admin_token():
     ?token=... にADMIN_TOKENと一致する値がないと403にする。"""
     # POSTの確認画面から来る場合はフォームの隠しフィールドに入っている
     token = request.args.get("token", "") or request.form.get("token", "")
-    if not ADMIN_TOKEN or not hmac.compare_digest(token, ADMIN_TOKEN):
+    admin_token = str(ADMIN_TOKEN)
+    if not admin_token or not hmac.compare_digest(token, admin_token):
         abort(403)
 
 
@@ -1134,7 +1161,7 @@ def admin_keepalive():
 def admin_panel():
     """管理者用の入力フォーム。日付と時間帯を選ぶだけで候補リストを組み立てて送信できる。"""
     check_admin_token()
-    return ADMIN_PANEL_HTML.replace("__PANEL_NAME__", PANEL_NAME)
+    return ADMIN_PANEL_HTML.replace("__PANEL_NAME__", str(PANEL_NAME))
 
 
 @app.route("/admin/members.json", methods=["GET"])
@@ -1528,7 +1555,7 @@ def admin_reset_confirm():
     return (
         RESET_PAGE_HTML.replace("__ROWS__", rows)
         .replace("__BACKUP__", backup)
-        .replace("__TOKEN__", ADMIN_TOKEN)
+        .replace("__TOKEN__", str(ADMIN_TOKEN))
     )
 
 
@@ -1639,34 +1666,85 @@ def handle_message(event):
         line_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[TextMessage(text=AUTO_REPLY)],
+                messages=[TextMessage(text=str(AUTO_REPLY))],
             )
         )
 
 
 # --- 生徒カルテ ------------------------------------------------------------
-# CARTE_LIFF_ID（またはCARTE_ENABLED）が設定されている地域だけ有効になる。
-# 未設定の地域では読み込みもしないので、従来の日程調整の動作は一切変わらない。
-if CARTE_ENABLED:
-    from carte import create_carte_blueprint
+# Blueprintは1回だけ登録し、公開可否と設定値はrequestのtenantで切り替える。
+from carte import create_carte_blueprint
 
-    app.register_blueprint(
-        create_carte_blueprint(
-            verify_liff_user, upsert_member, ADMIN_TOKEN, CARTE_LIFF_ID
-        )
+app.register_blueprint(
+    create_carte_blueprint(
+        verify_liff_user, upsert_member, ADMIN_TOKEN, CARTE_LIFF_ID
     )
+)
 
 
 @app.before_request
 def _block_disabled_features():
     """日程調整を使わない地域では、日程調整の画面を閉じる。
     SCHEDULE_ENABLEDが未設定なら何もしない（＝従来どおり全部開いている）。"""
+    tenant = (request.view_args or {}).pop("tenant", None)
+    if tenant is not None:
+        if tenant not in TENANTS:
+            abort(404)
+        g.tenant = tenant
+    else:
+        g.tenant = DEFAULT_TENANT
+
+    path = request.path
+    if (path.endswith("/carte") or "/api/carte/" in path or "/admin/carte" in path) and not CARTE_ENABLED:
+        return "この地域では生徒カルテを使っていません。", 404
     if SCHEDULE_ENABLED:
         return None
-    path = request.path
-    if any(path == p or path.startswith(p + "/") for p in SCHEDULE_PATHS):
+    tenant_path = path.removeprefix(f"/{g.tenant}") or "/"
+    if any(tenant_path == p or tenant_path.startswith(p + "/") for p in SCHEDULE_PATHS):
         return "この地域では日程調整を使っていません。", 404
     return None
+
+
+@app.after_request
+def _tenant_urls(response):
+    """Keep generated admin/LIFF links inside the active tenant namespace."""
+    tenant = getattr(g, "tenant", None)
+    if not tenant:
+        return response
+    location = response.headers.get("Location", "")
+    if location.startswith("/") and not location.startswith(f"/{tenant}/"):
+        response.headers["Location"] = f"/{tenant}{location}"
+    if response.mimetype == "text/html":
+        text = response.get_data(as_text=True)
+        for root in ("admin", "liff", "carte", "api/carte"):
+            text = text.replace(f'"/{root}', f'"/{tenant}/{root}')
+            text = text.replace(f"'/{root}", f"'/{tenant}/{root}")
+        response.set_data(text)
+    return response
+
+
+def _register_tenant_routes():
+    """Expose all feature pages under /kansai and /kanto."""
+    for rule in list(app.url_map.iter_rules()):
+        if rule.endpoint == "static" or rule.rule in {"/", "/healthz", "/webhook"}:
+            continue
+        methods = sorted(rule.methods - {"HEAD", "OPTIONS"})
+        endpoint = "tenant_" + rule.endpoint.replace(".", "_")
+        app.add_url_rule(
+            f"/<tenant>{rule.rule}",
+            endpoint=endpoint,
+            view_func=app.view_functions[rule.endpoint],
+            methods=methods,
+        )
+    app.add_url_rule(
+        "/webhook/<tenant>",
+        endpoint="tenant_webhook",
+        view_func=webhook,
+        methods=["POST"],
+    )
+
+
+_register_tenant_routes()
 
 
 if __name__ == "__main__":
