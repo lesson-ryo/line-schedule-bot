@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
+import hashlib
+import json
+import os
 import re
 from zoneinfo import ZoneInfo
 
-from flask import g
+import requests
+from flask import g, has_request_context
 
 from storage import load_json, save_json
-from tenant_config import TENANT_NAMES
+from tenant_config import TENANT_NAMES, reset_tenant_override, set_tenant_override
 
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -22,6 +26,13 @@ def tenant_scope(name: str):
     """Temporarily select a tenant while keeping shared admin routes tenant-free."""
     if name not in TENANT_NAMES:
         raise ValueError("地域が正しくありません。")
+    if not has_request_context():
+        token = set_tenant_override(name)
+        try:
+            yield
+        finally:
+            reset_tenant_override(token)
+        return
     previous = getattr(g, "tenant", None)
     g.tenant = name
     try:
@@ -32,6 +43,10 @@ def tenant_scope(name: str):
 
 def _as_list(value):
     return value if isinstance(value, list) else []
+
+
+def _as_dict(value):
+    return value if isinstance(value, dict) else {}
 
 
 def parse_schedule_date(label: str, today: date | None = None) -> date | None:
@@ -74,6 +89,163 @@ def _slot_interval(slot: dict, today: date | None = None):
     if not day or not start or not end:
         return None
     return datetime.combine(day, start, JST), datetime.combine(day, end, JST)
+
+
+def _calendar_events(tenant: str, assignment: list[dict], now: datetime | None = None) -> list[dict]:
+    """Convert current/future assignment rows into stable Calendar events."""
+    now = now or datetime.now(JST)
+    label = TENANT_LABELS[tenant]
+    occurrences = {}
+    events = []
+    for slot in assignment:
+        interval = _slot_interval(slot, today=now.date())
+        if not interval or interval[1] < now:
+            continue
+        name = str(slot.get("name", "") or "レッスン").strip()
+        location = str(slot.get("location", "") or "").strip()
+        identity = json.dumps(
+            {
+                "tenant": tenant,
+                "start": interval[0].isoformat(),
+                "end": interval[1].isoformat(),
+                "name": name,
+                "location": location,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        occurrences[identity] = occurrences.get(identity, 0) + 1
+        key = hashlib.sha256(
+            f"{identity}:{occurrences[identity]}".encode("utf-8")
+        ).hexdigest()[:32]
+        description = "\n".join(
+            [
+                "日程調整アプリから自動同期",
+                f"地域: {label}",
+                f"生徒: {name}",
+            ]
+        )
+        events.append(
+            {
+                "key": key,
+                "title": f"【{label}】レッスン：{name}",
+                "start": interval[0].isoformat(),
+                "end": interval[1].isoformat(),
+                "location": location,
+                "description": description,
+            }
+        )
+    return events
+
+
+def calendar_sync_status(tenant: str) -> dict:
+    """Return a secret-free, no-write preview of one region's Calendar state."""
+    if tenant not in TENANT_NAMES:
+        raise ValueError("地域が正しくありません。")
+    with tenant_scope(tenant):
+        assignment = _as_list(load_json("assignment", default=[]))
+        state = _as_dict(load_json("calendar_sync", default={}))
+    events = _calendar_events(tenant, assignment)
+    records = _as_list(state.get("records"))
+    synced = {str(row.get("key") or "") for row in records if isinstance(row, dict)}
+    return {
+        "tenant": tenant,
+        "label": TENANT_LABELS[tenant],
+        "configured": bool(
+            os.environ.get("REPERTOIRE_SHEET_WRITE_URL", "").strip()
+            and os.environ.get("REPERTOIRE_SHEET_WRITE_SECRET", "").strip()
+        ),
+        "calendar_name": str(state.get("calendar_name") or f"Lesson {TENANT_LABELS[tenant]} 日程"),
+        "event_count": len(events),
+        "synced_count": sum(event["key"] in synced for event in events),
+        "pending_count": sum(event["key"] not in synced for event in events),
+        "last_synced_at": str(state.get("synced_at") or ""),
+        "last_error": str(state.get("last_error") or ""),
+        "events": events,
+    }
+
+
+def sync_calendar_schedule(tenant: str) -> dict:
+    """Mirror one region's current/future assignments to its Google Calendar."""
+    status = calendar_sync_status(tenant)
+    if not status["configured"]:
+        return {
+            "ok": False,
+            "configured": False,
+            "error": "Googleカレンダー連携がまだ設定されていません。",
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+        }
+
+    with tenant_scope(tenant):
+        state = _as_dict(load_json("calendar_sync", default={}))
+    old_records = [row for row in _as_list(state.get("records")) if isinstance(row, dict)]
+    desired_keys = {event["key"] for event in status["events"]}
+    now = datetime.now(JST)
+    keep_records = []
+    delete_event_ids = []
+    for record in old_records:
+        if str(record.get("key") or "") in desired_keys:
+            continue
+        try:
+            start = datetime.fromisoformat(str(record.get("start") or ""))
+        except ValueError:
+            start = now
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=JST)
+        if start < now:
+            keep_records.append(record)
+        elif record.get("event_id"):
+            delete_event_ids.append(str(record["event_id"]))
+
+    payload = {
+        "secret": os.environ.get("REPERTOIRE_SHEET_WRITE_SECRET", ""),
+        "action": "calendar_sync",
+        "tenant": tenant,
+        "events": status["events"],
+        "existing": old_records,
+        "delete_event_ids": delete_event_ids,
+    }
+    try:
+        response = requests.post(
+            os.environ["REPERTOIRE_SHEET_WRITE_URL"], json=payload, timeout=60
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error") or "Googleカレンダーの同期に失敗しました。")
+        new_state = {
+            "version": 1,
+            "calendar_id": str(result.get("calendar_id") or ""),
+            "calendar_name": str(result.get("calendar_name") or status["calendar_name"]),
+            "synced_at": datetime.now(JST).isoformat(),
+            "last_error": "",
+            "records": (keep_records + _as_list(result.get("records")))[-1000:],
+        }
+        with tenant_scope(tenant):
+            save_json("calendar_sync", new_state)
+        return {
+            "ok": True,
+            "configured": True,
+            "calendar_name": new_state["calendar_name"],
+            "created": int(result.get("created") or 0),
+            "updated": int(result.get("updated") or 0),
+            "deleted": int(result.get("deleted") or 0),
+            "error": "",
+        }
+    except Exception as exc:
+        state["last_error"] = str(exc)[:300]
+        with tenant_scope(tenant):
+            save_json("calendar_sync", state)
+        return {
+            "ok": False,
+            "configured": True,
+            "error": str(exc)[:300],
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+        }
 
 
 def cross_tenant_conflicts(current_tenant: str, proposed: list[dict]) -> list[str]:

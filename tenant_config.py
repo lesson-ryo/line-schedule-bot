@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from flask import g, has_request_context
 
 
 TENANT_NAMES = ("kansai", "kanto")
+_TENANT_OVERRIDE = ContextVar("lesson_tenant_override", default=None)
 DEFAULT_TENANT = os.environ.get("DEFAULT_TENANT") or (
     "kanto" if os.environ.get("STORAGE_PREFIX", "").startswith("kanto:") else "kansai"
 )
@@ -90,7 +92,20 @@ def get_tenant(name: str | None = None) -> TenantConfig:
         return TENANTS[name]
     if has_request_context() and getattr(g, "tenant", None):
         return TENANTS[g.tenant]
+    override = _TENANT_OVERRIDE.get()
+    if override:
+        return TENANTS[override]
     return TENANTS[DEFAULT_TENANT]
+
+
+def set_tenant_override(name: str):
+    if name not in TENANT_NAMES:
+        raise ValueError("地域が正しくありません。")
+    return _TENANT_OVERRIDE.set(name)
+
+
+def reset_tenant_override(token):
+    _TENANT_OVERRIDE.reset(token)
 
 
 def validate_tenants() -> list[str]:

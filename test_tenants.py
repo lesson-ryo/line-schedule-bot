@@ -488,3 +488,116 @@ def test_student_carte_has_tap_summary_filters(client):
     assert "function renderSummary()" in html
     assert "function chooseSummary(value)" in html
     assert "次回" in html
+
+
+def test_teacher_can_sync_each_region_to_google_calendar(client, monkeypatch):
+    http, storage, tmp_path = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_URL", "https://script.example/exec")
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_SECRET", "writer-secret")
+
+    from flask import g
+    import lesson_operations
+
+    with http.application.test_request_context("/kansai/admin/panel"):
+        g.tenant = "kansai"
+        storage.save_json(
+            "assignment",
+            [{
+                "day": "2099-08-20",
+                "time": "13:00",
+                "end": "14:00",
+                "name": "生徒A",
+                "location": "梅田教室",
+                "member_ids": ["student-a"],
+            }],
+        )
+
+    sent = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            event = sent["payload"]["events"][0]
+            return {
+                "ok": True,
+                "calendar_id": "kansai-calendar@example.com",
+                "calendar_name": "Lesson 関西 日程",
+                "created": 1,
+                "updated": 0,
+                "deleted": 0,
+                "records": [{**event, "event_id": "event-1"}],
+            }
+
+    def post(url, json, timeout):
+        sent.update(url=url, payload=json, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr(lesson_operations.requests, "post", post)
+    response = http.post("/admin/calendar/kansai", **secure)
+    assert response.status_code == 302
+    assert sent["payload"]["action"] == "calendar_sync"
+    assert sent["payload"]["tenant"] == "kansai"
+    assert sent["payload"]["secret"] == "writer-secret"
+    assert sent["payload"]["events"][0]["title"] == "【関西】レッスン：生徒A"
+    assert sent["payload"]["events"][0]["start"].startswith("2099-08-20T13:00")
+
+    state = json.loads((Path(tmp_path) / "calendar_sync.json").read_text())
+    assert state["calendar_name"] == "Lesson 関西 日程"
+    assert state["records"][0]["event_id"] == "event-1"
+
+    page = http.get("/admin/calendar", **secure)
+    html = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "Lesson 関西 日程" in html
+    assert "同期済み 1件" in html
+    assert "Lesson 関東 日程" in html
+
+
+def test_calendar_sync_deletes_removed_future_events(client, monkeypatch):
+    http, storage, _ = client
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_URL", "https://script.example/exec")
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_SECRET", "writer-secret")
+    from flask import g
+    import lesson_operations
+
+    with http.application.test_request_context("/kansai/admin/panel"):
+        g.tenant = "kansai"
+        storage.save_json("assignment", [])
+        storage.save_json(
+            "calendar_sync",
+            {
+                "records": [{
+                    "key": "old-key",
+                    "event_id": "old-event",
+                    "start": "2099-08-20T13:00:00+09:00",
+                }]
+            },
+        )
+
+    sent = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "ok": True,
+                "calendar_name": "Lesson 関西 日程",
+                "records": [],
+                "deleted": 1,
+            }
+
+    monkeypatch.setattr(
+        lesson_operations.requests,
+        "post",
+        lambda url, json, timeout: (sent.update(payload=json) or Response()),
+    )
+    result = lesson_operations.sync_calendar_schedule("kansai")
+    assert result["ok"] is True
+    assert result["deleted"] == 1
+    assert sent["payload"]["delete_event_ids"] == ["old-event"]

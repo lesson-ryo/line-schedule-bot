@@ -1247,11 +1247,22 @@ def admin_assign():
             409,
         )
 
-    # 通知で使えるように結果を保存しておく
+    # 通知で使えるように結果を保存し、Googleカレンダーにも反映する。
     save_json("assignment", result.get("schedule", []))
+    from lesson_operations import sync_calendar_schedule
+
+    calendar_result = sync_calendar_schedule(get_tenant().name)
 
     panel = admin_link("panel")
     body = assign_mod.format_result(result)
+    if calendar_result.get("configured"):
+        if calendar_result.get("ok"):
+            body += (
+                "\n\nGoogleカレンダー同期済み "
+                f"（追加{calendar_result['created']}・更新{calendar_result['updated']}・削除{calendar_result['deleted']}）"
+            )
+        else:
+            body += "\n\nGoogleカレンダーは未反映です。講師ホームから再同期してください。"
     notify = admin_link("notify")
     edit = admin_link("schedule")
     links = (
@@ -1345,7 +1356,11 @@ async function save() {
     });
     const r = await res.json();
     box.className = res.ok ? 'ok' : 'err';
-    box.textContent = res.ok ? '保存しました。通知にはこの内容が使われます。' : ('エラー: ' + (r.error || ''));
+    let calendarNote = '';
+    if (res.ok && r.calendar && r.calendar.configured) {
+      calendarNote = r.calendar.ok ? ' Googleカレンダーにも同期しました。' : ' Googleカレンダーは未反映です。講師ホームから再同期してください。';
+    }
+    box.textContent = res.ok ? ('保存しました。通知にはこの内容が使われます。' + calendarNote) : ('エラー: ' + (r.error || ''));
     if (res.ok) { data = r; render(); }
   } catch (e) {
     box.className = 'err'; box.textContent = 'エラー: ' + e;
@@ -1444,7 +1459,14 @@ def admin_schedule_save():
     if conflicts:
         return {"error": "地域をまたぐ日程重複があります。 " + " ".join(conflicts)}, 409
     save_json("assignment", updated)
-    return {"schedule": updated, "names": sorted(directory.keys())}
+    from lesson_operations import sync_calendar_schedule
+
+    calendar_result = sync_calendar_schedule(get_tenant().name)
+    return {
+        "schedule": updated,
+        "names": sorted(directory.keys()),
+        "calendar": calendar_result,
+    }
 
 
 @app.route("/admin/notify", methods=["GET"])

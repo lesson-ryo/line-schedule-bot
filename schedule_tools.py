@@ -404,14 +404,26 @@ def restore_replies() -> str:
     for key, value in snapshot["data"].items():
         save_json(key, value)
         restored.append(f"{RESET_LABELS.get(key, key)} {len(value) if hasattr(value, '__len__') else 0}件")
-    return "控えから元に戻しました。\n" + " / ".join(restored)
+    from lesson_operations import sync_calendar_schedule
+
+    calendar = sync_calendar_schedule(get_tenant().name)
+    note = ""
+    if calendar.get("configured"):
+        note = "\nGoogleカレンダーも同期しました。" if calendar.get("ok") else "\nGoogleカレンダーは未反映です。講師ホームから再同期してください。"
+    return "控えから元に戻しました。\n" + " / ".join(restored) + note
 
 
 def reset_replies() -> str:
     """回答データを消す。**先に backup_replies() を呼ぶこと。**"""
     for key in RESET_KEYS:
         save_json(key, [])
-    return "回答データ（日程・教室・連絡事項・割り当て）をリセットしました。"
+    from lesson_operations import sync_calendar_schedule
+
+    calendar = sync_calendar_schedule(get_tenant().name)
+    note = ""
+    if calendar.get("configured"):
+        note = " Googleカレンダーも同期しました。" if calendar.get("ok") else " Googleカレンダーは未反映です。講師ホームから再同期してください。"
+    return "回答データ（日程・教室・連絡事項・割り当て）をリセットしました。" + note
 
 
 if __name__ == "__main__":
