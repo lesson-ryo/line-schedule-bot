@@ -152,6 +152,53 @@ def test_song_entry_rejects_duplicate_youtube_alias(client, monkeypatch):
     assert "同じ動画URL" in response.get_data(as_text=True)
 
 
+def test_teacher_song_entry_writes_to_google_sheet_when_configured(client, monkeypatch):
+    http, _, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+
+    import carte
+
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_URL", "https://script.example/exec")
+    monkeypatch.setenv("REPERTOIRE_SHEET_WRITE_SECRET", "writer-secret")
+    monkeypatch.setattr(carte, "load_materials", lambda force=False: [])
+
+    sent = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "id": 430}
+
+    def post(url, json, timeout):
+        sent.update(url=url, payload=json, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr(carte.requests, "post", post)
+    response = http.post(
+        "/admin/songs",
+        data={
+            "title": "シートへ追加する曲",
+            "instrument": "ウクレレ",
+            "kind": "弾き語り",
+            "artist": "歌手",
+            "video": "https://youtu.be/new-sheet-song",
+            "note": "メモ",
+            "genre": "ポップス",
+        },
+        **secure,
+    )
+
+    assert response.status_code == 302
+    assert sent["url"] == "https://script.example/exec"
+    assert sent["timeout"] == 20
+    assert sent["payload"]["secret"] == "writer-secret"
+    assert sent["payload"]["genre"] == "ポップス"
+    assert "Google+Sheet" in response.headers["Location"]
+
+
 def test_next_lesson_summary_can_be_sent(client, monkeypatch):
     http, storage, _ = client
     secure = {"base_url": "https://localhost"}
