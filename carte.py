@@ -247,7 +247,16 @@ function buildGroups(){
  groupSel.innerHTML=html;
 }
 function setGroup(v,redraw){group=v;groupSel.value=v;if(groupSel.value!==v){group='';groupSel.value=''}try{localStorage.setItem('carteGroup',group)}catch(e){}if(redraw)draw()}const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const isDone=p=>p?.lesson_done===true||(!('lesson_done' in (p||{}))&&p?.status==='completed');const stateOf=p=>isDone(p)?'done':(p?.status==='wanted'?'wanted':'notdone');const stateLabel=s=>s==='done'?'✓ 実施済み':(s==='wanted'?'★ やりたい':'未実施');const lessonDate=p=>p?.lesson_date||(p?.status==='completed'&&p?.completed_at?p.completed_at.slice(0,10):'');const jaDate=s=>s?s.replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$1/$2/$3'):'';
-async function api(url,body){let r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,idToken:token})}),d=await r.json();if(!r.ok)throw Error(d.error||'エラー');return d}
+// LIFFはIDトークンをブラウザに保存して使い回す。期限（約1時間）が切れたものを
+// そのまま送ると、以後ずっと「認証に失敗しました」になる。切れていたらログインし直す。
+function liffTokenExp(t){try{return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp*1000}catch(e){return 0}}
+function liffTokenFresh(t){return !!t&&liffTokenExp(t)-60000>Date.now()}
+// 入り直せたら true。短時間に繰り返すと無限ループになるので30秒に1回まで。
+// falseのときは呼び出し側でそのまま進め、サーバーからのエラー文を画面に出す。
+function liffRelogin(){let last=0;try{last=Number(sessionStorage.getItem('liffRelogin')||0)}catch(e){}if(Date.now()-last<30000)return false;try{sessionStorage.setItem('liffRelogin',String(Date.now()))}catch(e){}
+ if(liff.isInClient()){location.reload();return true}  // LINEアプリ内はlogoutが効かない。開き直せば新しいトークンが来る
+ try{liff.logout()}catch(e){}liff.login({redirectUri:location.href});return true}
+async function api(url,body){let r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,idToken:token})});if(r.status===401&&liffRelogin())throw Error('ログインの有効期限が切れました。読み込み直しています…');let d=await r.json();if(!r.ok)throw Error(d.error||'エラー');return d}
 function tags(m){let out='';if(m.instrument)out+=`<span class="tag ${m.instrument==='ウクレレ'?'uk':'gt'}">${esc(m.instrument)}</span>`;if(m.kind)out+=`<span class="tag kind">${esc(m.kind)}</span>`;if(m.genre)out+=`<span class="tag genre">${esc(m.genre)}</span>`;let w=popular[m.id]?.wanted||0;if(w)out+=`<span class="tag pop">★${w}人</span>`;return out}
 const videoUrls=s=>String(s||'').match(/https?:\/\/[^\s]+/g)||[];
 function videos(m){let us=videoUrls(m.video);return us.map((u,i)=>`<a class="vid" href="${esc(u)}" onclick="playVideo(event,'${esc(u)}')">▶ ${us.length>1?'動画'+(i+1):'動画'}</a>`).join('')}
@@ -261,7 +270,7 @@ async function vote(id){try{let d=await api('/api/carte/request/vote',{id});requ
 async function sendRequest(e){e.preventDefault();let b=reqButton;b.disabled=true;b.textContent='送信中';try{let d=await api('/api/carte/request',{title:reqTitle.value,artist:reqArtist.value,instrument:reqInstrument.value,comment:reqComment.value});requests=d.requests;reqTitle.value='';reqArtist.value='';reqComment.value='';drawRequests();notice.textContent='リクエストを送りました';notice.style.display='block';setTimeout(()=>notice.style.display='none',2000)}catch(err){alert(err.message)}finally{b.disabled=false;b.textContent='送信'}}
 function openEditor(id){let m=materials.find(x=>x.id===id),p=progress[id];editingId=id;editSong.textContent=m.title;document.querySelector(`input[name="state"][value="${stateOf(p)}"]`).checked=true;lessonDate.value=lessonDate(p);studentNote.value=p?.student_note||'';editor.showModal()}
 async function save(e){e.preventDefault();let st=document.querySelector('input[name="state"]:checked')?.value||'notdone',done=st==='done',button=saveButton;button.disabled=true;button.textContent='保存中';try{let d=await api('/api/carte/progress',{material_id:editingId,lesson_done:done,lesson_date:lessonDate.value,student_note:studentNote.value,status:done?'completed':(st==='wanted'?'wanted':'planned')});progress[editingId]=d.progress;editor.close();draw();notice.style.display='block';setTimeout(()=>notice.style.display='none',1800)}catch(err){alert(err.message)}finally{button.disabled=false;button.textContent='保存'}}
-async function main(){await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login();return}token=liff.getIDToken();let d=await api('/api/carte/me',{});materials=d.materials;popular=d.popular||{};requests=d.requests||[];progress=Object.fromEntries(d.progress.map(p=>[p.material_id,p]));heading.textContent=(d.display_name||'')+'さんのカルテ';
+async function main(){await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login({redirectUri:location.href});return}token=liff.getIDToken();if(!liffTokenFresh(token)&&liffRelogin())return;let d=await api('/api/carte/me',{});materials=d.materials;popular=d.popular||{};requests=d.requests||[];progress=Object.fromEntries(d.progress.map(p=>[p.material_id,p]));heading.textContent=(d.display_name||'')+'さんのカルテ';
  buildGroups();
  let saved=null;try{saved=localStorage.getItem('carteGroup')}catch(e){}
  setGroup(saved!==null?saved:(d.instrument?'ins:'+d.instrument:''),false);

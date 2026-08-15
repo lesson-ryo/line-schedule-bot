@@ -247,13 +247,35 @@ function updateDayCounts() {
   });
 }
 
+// LIFFはIDトークンをブラウザに保存して使い回す。期限（約1時間）が切れたものを
+// そのまま送ると、以後ずっと「認証に失敗しました」になる。切れていたらログインし直す。
+function liffTokenExp(t) {
+  try {
+    return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000;
+  } catch (e) { return 0; }
+}
+function liffTokenFresh(t) { return !!t && liffTokenExp(t) - 60000 > Date.now(); }
+// 入り直せたら true。短時間に繰り返すと無限ループになるので30秒に1回まで。
+function liffRelogin() {
+  let last = 0;
+  try { last = Number(sessionStorage.getItem('liffRelogin') || 0); } catch (e) {}
+  if (Date.now() - last < 30000) return false;
+  try { sessionStorage.setItem('liffRelogin', String(Date.now())); } catch (e) {}
+  // LINEアプリ内では logout が効かない。開き直せば新しいトークンが来る。
+  if (liff.isInClient()) { location.reload(); return true; }
+  try { liff.logout(); } catch (e) {}
+  liff.login({ redirectUri: location.href });
+  return true;
+}
+
 async function main() {
   await liff.init({ liffId: LIFF_ID });
   if (!liff.isLoggedIn()) {
-    liff.login();
+    liff.login({ redirectUri: location.href });
     return;
   }
   idToken = liff.getIDToken();
+  if (!liffTokenFresh(idToken) && liffRelogin()) return;
   const res = await fetch("/liff/candidates");
   const data = await res.json();
   candidates = data.candidates || [];
@@ -491,7 +513,17 @@ def verify_liff_user(id_token: str):
         timeout=10,
     )
     if verify_res.status_code != 200:
-        return None, "認証に失敗しました。もう一度LINEアプリ内からフォームを開き直してください。"
+        # LINEが理由を返してくれるので、そのまま出す（調査のとき原因がすぐ分かる）。
+        detail = ""
+        try:
+            detail = str(verify_res.json().get("error_description", ""))
+        except Exception:
+            pass
+        if "expired" in detail.lower():
+            # 画面側が自動でログインし直すので、待つだけでよい。
+            return None, "ログインの有効期限が切れました。読み込み直しています…"
+        suffix = f"（{detail}）" if detail else ""
+        return None, f"認証に失敗しました。もう一度LINEアプリ内からフォームを開き直してください。{suffix}"
 
     payload = verify_res.json()
     user_id = payload.get("sub", "")
