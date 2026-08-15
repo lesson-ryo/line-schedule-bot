@@ -14,7 +14,7 @@ import requests
 from flask import g, has_request_context
 
 from storage import load_json, save_json
-from tenant_config import TENANT_NAMES, reset_tenant_override, set_tenant_override
+from tenant_config import TENANTS, TENANT_NAMES, reset_tenant_override, set_tenant_override
 
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -345,10 +345,12 @@ def sync_attendance_from_schedule(tenant: str) -> dict:
     created = 0
     updated = 0
     now = datetime.now(JST).isoformat()
+    active_record_ids = set()
     for slot in assignment:
         lesson_id = str(slot.get("lesson_id") or "")
         for user_id in [str(value) for value in slot.get("member_ids", []) if value]:
             record_id = f"{tenant}:{lesson_id}:{user_id}"
+            active_record_ids.add(record_id)
             values = {
                 "id": record_id,
                 "lesson_id": lesson_id,
@@ -370,6 +372,14 @@ def sync_attendance_from_schedule(tenant: str) -> dict:
                 if any(record.get(key) != value for key, value in values.items()):
                     record.update(values, updated_at=now)
                     updated += 1
+    today = datetime.now(JST).date()
+    for record in rows:
+        if record.get("tenant") != tenant or record.get("id") in active_record_ids:
+            continue
+        lesson_day = parse_schedule_date(record.get("day", ""), today=today)
+        if record.get("status", "scheduled") == "scheduled" and lesson_day and lesson_day >= today:
+            record.update(status="cancelled", updated_at=now)
+            updated += 1
     if created or updated:
         with tenant_scope("kanto"):
             save_json("carte:attendance", rows[-5000:])
@@ -932,6 +942,8 @@ def run_due_automations(push_text, now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(JST)
     results = []
     for tenant in TENANT_NAMES:
+        if not TENANTS[tenant].schedule_enabled:
+            continue
         settings = automation_settings(tenant)
         tomorrow_at = datetime.combine(now.date(), _clock(settings["tomorrow_time"]), JST)
         if settings["tomorrow_enabled"] and now >= tomorrow_at:
