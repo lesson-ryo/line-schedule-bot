@@ -1,4 +1,4 @@
-# Google Sheet song writer
+# Google Sheet song writer and Calendar sync
 
 The teacher song-entry page works immediately with shared Redis storage. To
 add, edit, archive, and republish songs directly in the repertoire Google Sheet,
@@ -16,6 +16,23 @@ Set matching Apps Script properties:
 
 Deploy the web app to execute as the owner and allow anyone with the URL. The
 shared secret is checked on every write request.
+
+The same web app also synchronizes confirmed lesson schedules to Google
+Calendar. On the first sync it automatically creates two separate calendars:
+
+- `Lesson 関西 日程`
+- `Lesson 関東 日程`
+
+Their IDs are saved automatically as the script properties
+`KANSAI_CALENDAR_ID` and `KANTO_CALENDAR_ID`. To use calendars that already
+exist, set those properties to the corresponding Calendar IDs before the first
+sync. To intentionally put both regions on one calendar, set `CALENDAR_ID`
+instead.
+
+When Calendar support is added to an existing deployment, authorize the new
+Calendar permission and create a new web-app version. The teacher page at
+`/admin/calendar` can retry a failed sync safely. Only events created by this
+app are updated or deleted; manually entered Calendar events are untouched.
 
 The repertoire sheet must use these columns in order:
 

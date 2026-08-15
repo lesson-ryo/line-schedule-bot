@@ -56,6 +56,130 @@ function ensureSchema_(sheet) {
   return columnCount;
 }
 
+function calendarForTenant_(props, tenant) {
+  if (!['kansai', 'kanto'].includes(tenant)) {
+    throw new Error('invalid tenant');
+  }
+  const propertyName = tenant.toUpperCase() + '_CALENDAR_ID';
+  const configuredId = props.getProperty(propertyName) || props.getProperty('CALENDAR_ID') || '';
+  let calendar = null;
+  if (configuredId === 'primary') {
+    calendar = CalendarApp.getDefaultCalendar();
+  } else if (configuredId) {
+    calendar = CalendarApp.getCalendarById(configuredId);
+  }
+  if (!calendar) {
+    const label = tenant === 'kansai' ? '関西' : '関東';
+    calendar = CalendarApp.createCalendar('Lesson ' + label + ' 日程', {
+      description: 'Lesson日程調整アプリから自動同期される予定',
+      timeZone: 'Asia/Tokyo',
+    });
+    props.setProperty(propertyName, calendar.getId());
+  }
+  return calendar;
+}
+
+function authorizeCalendar() {
+  // Run once from the editor after adding Calendar support to an old deployment.
+  return CalendarApp.getDefaultCalendar().getName();
+}
+
+function eventById_(calendar, eventId) {
+  if (!eventId) return null;
+  try {
+    return calendar.getEventById(String(eventId));
+  } catch (_) {
+    return null;
+  }
+}
+
+function eventByTag_(calendar, row) {
+  const start = new Date(row.start);
+  const end = new Date(row.end);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+    throw new Error('invalid event time');
+  }
+  const margin = 24 * 60 * 60 * 1000;
+  const events = calendar.getEvents(
+    new Date(start.getTime() - margin),
+    new Date(end.getTime() + margin)
+  );
+  return events.find(event => event.getTag('lesson_sync_key') === String(row.key || '')) || null;
+}
+
+function syncCalendar_(body, props) {
+  const tenant = String(body.tenant || '');
+  const rows = Array.isArray(body.events) ? body.events : [];
+  const existing = Array.isArray(body.existing) ? body.existing : [];
+  const deleteEventIds = Array.isArray(body.delete_event_ids) ? body.delete_event_ids : [];
+  if (rows.length > 300 || deleteEventIds.length > 300) {
+    throw new Error('too many calendar events');
+  }
+  const calendar = calendarForTenant_(props, tenant);
+  const oldByKey = {};
+  existing.forEach(row => {
+    if (row && row.key) oldByKey[String(row.key)] = row;
+  });
+
+  let created = 0;
+  let updated = 0;
+  let deleted = 0;
+  const records = [];
+  rows.forEach(row => {
+    const key = String((row && row.key) || '');
+    if (!key || key.length > 80) throw new Error('invalid calendar key');
+    const start = new Date(row.start);
+    const end = new Date(row.end);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+      throw new Error('invalid event time');
+    }
+    const previous = oldByKey[key] || {};
+    let event = eventById_(calendar, previous.event_id) || eventByTag_(calendar, row);
+    if (event) {
+      event
+        .setTitle(String(row.title || 'レッスン'))
+        .setTime(start, end)
+        .setDescription(String(row.description || ''))
+        .setLocation(String(row.location || ''));
+      updated += 1;
+    } else {
+      event = calendar.createEvent(String(row.title || 'レッスン'), start, end, {
+        description: String(row.description || ''),
+        location: String(row.location || ''),
+      });
+      created += 1;
+    }
+    event.setTag('lesson_sync_key', key);
+    event.setTag('lesson_sync_tenant', tenant);
+    records.push({
+      key: key,
+      event_id: event.getId(),
+      start: String(row.start),
+      end: String(row.end),
+      title: String(row.title || ''),
+    });
+  });
+
+  const desiredIds = new Set(records.map(row => row.event_id));
+  deleteEventIds.forEach(eventId => {
+    if (!eventId || desiredIds.has(String(eventId))) return;
+    const event = eventById_(calendar, eventId);
+    if (event && event.getTag('lesson_sync_tenant') === tenant) {
+      event.deleteEvent();
+      deleted += 1;
+    }
+  });
+  return {
+    ok: true,
+    calendar_id: calendar.getId(),
+    calendar_name: calendar.getName(),
+    records: records,
+    created: created,
+    updated: updated,
+    deleted: deleted,
+  };
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -67,15 +191,17 @@ function doPost(e) {
       return jsonResponse_({ok: false, error: 'unauthorized'});
     }
 
+    const action = String(body.action || 'add');
+    if (action === 'calendar_sync') {
+      return jsonResponse_(syncCalendar_(body, props));
+    }
+    if (!['add', 'update', 'archive', 'publish'].includes(action)) {
+      return jsonResponse_({ok: false, error: 'invalid action'});
+    }
     const spreadsheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'));
     const gid = Number(props.getProperty('SHEET_GID') || '0');
     const sheet = spreadsheet.getSheets().find(s => s.getSheetId() === gid);
     if (!sheet) return jsonResponse_({ok: false, error: 'sheet not found'});
-
-    const action = String(body.action || 'add');
-    if (!['add', 'update', 'archive', 'publish'].includes(action)) {
-      return jsonResponse_({ok: false, error: 'invalid action'});
-    }
     const columnCount = ensureSchema_(sheet);
     const lastRow = Math.max(sheet.getLastRow(), 1);
     const existing = lastRow > 1
