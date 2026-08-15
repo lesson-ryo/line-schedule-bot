@@ -10,6 +10,7 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 日程の一斉送信・集計は schedule_tools.py で行う（このサーバーとは別に実行する）。
 """
 
+import hmac
 import os
 import requests
 from datetime import datetime
@@ -591,8 +592,9 @@ def liff_submit():
 def check_admin_token():
     """無料プランはShellが使えないため、ブラウザから叩けるURLで管理操作を行う。
     ?token=... にADMIN_TOKENと一致する値がないと403にする。"""
-    token = request.args.get("token", "")
-    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+    # POSTの確認画面から来る場合はフォームの隠しフィールドに入っている
+    token = request.args.get("token", "") or request.form.get("token", "")
+    if not ADMIN_TOKEN or not hmac.compare_digest(token, ADMIN_TOKEN):
         abort(403)
 
 
@@ -735,7 +737,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div class="links" style="margin-top:14px">
     <a href="#" onclick="go('summarize');return false;">回答を集計する</a>
     <a href="#" onclick="runAssign();return false;">時間枠を自動で割り当てる</a>
-    <a href="#" onclick="if(confirm('回答データを削除します。よろしいですか？'))go('reset');return false;">回答をリセットする</a>
+    <a href="#" onclick="go('reset');return false;">回答をリセットする</a>
     <a href="#" onclick="go('keepalive');return false;">起動維持の状態</a>
   </div>
 </div>
@@ -1442,14 +1444,103 @@ def admin_summarize():
     return f"<pre>{result}</pre>"
 
 
-@app.route("/admin/reset", methods=["GET"])
-def admin_reset():
-    """?token=... にアクセスすると投票データをリセットする（次回の日程調整の前に使う）"""
-    check_admin_token()
-    from schedule_tools import reset_replies
+RESET_PAGE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>回答のリセット</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#202428;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;padding:24px}
+.box{max-width:560px;margin:0 auto;background:#fff;border:1px solid #dfe3e6;border-radius:12px;padding:26px}
+h1{font-size:20px;margin:0 0 6px}.lead{color:#687078;font-size:13px;margin:0 0 20px}
+.warn{background:#fff6f5;border:1px solid #f0cfcb;border-radius:8px;padding:14px 16px;margin:0 0 20px}
+.warn b{color:#a52b21}
+table{width:100%;border-collapse:collapse;margin:0 0 20px}
+td{padding:8px 0;border-bottom:1px solid #f0f2f3;font-size:14px}
+td.num{text-align:right;font-weight:700}
+tr:last-child td{border-bottom:0}
+.safe{background:#f2f8f5;border:1px solid #cfe4d9;border-radius:8px;padding:14px 16px;margin:0 0 20px;font-size:13px;color:#0f6e56}
+.row{display:flex;gap:10px}
+button{height:44px;border-radius:8px;font-size:15px;cursor:pointer}
+.danger{flex:1;background:#c0392b;border:1px solid #c0392b;color:#fff;font-weight:700}
+.cancel{flex:1;background:#fff;border:1px solid #bec5c9;color:#202428;text-decoration:none;display:flex;align-items:center;justify-content:center}
+</style></head><body><main class="box">
+<h1>回答をリセットします</h1>
+<p class="lead">次回の日程調整を始める前に、前回の回答を消す操作です。</p>
+<div class="warn"><b>この操作は元に戻せません。</b><br>ただし消す直前の控えを1つだけ自動で保存するので、間違えた場合はすぐ戻せます。</div>
+<table>__ROWS__</table>
+<div class="safe">__BACKUP__</div>
+<form method="post" action="/admin/reset">
+<input type="hidden" name="token" value="__TOKEN__">
+<div class="row">
+<a class="cancel" href="/admin/panel?token=__TOKEN__">やめる</a>
+<button class="danger" type="submit">控えを取って削除する</button>
+</div></form>
+</main></body></html>"""
 
+
+@app.route("/admin/reset", methods=["GET"])
+def admin_reset_confirm():
+    """確認画面を出すだけ。**このURLを開いてもデータは消えない。**
+    以前はGETで即削除していたため、URLを踏むだけで事故る恐れがあった。"""
+    check_admin_token()
+    from schedule_tools import reset_counts, backup_info
+
+    rows = "".join(
+        f"<tr><td>{label}</td><td class='num'>{count}件</td></tr>"
+        for label, count in reset_counts()
+    )
+    info = backup_info()
+    if info:
+        detail = "、".join(f"{l} {c}件" for l, c in info["counts"])
+        backup = f"現在の控え: {info['at'][:16].replace('T', ' ')}（{detail}）"
+    else:
+        backup = "控えはまだありません。今回の削除時に作成されます。"
+
+    return (
+        RESET_PAGE_HTML.replace("__ROWS__", rows)
+        .replace("__BACKUP__", backup)
+        .replace("__TOKEN__", ADMIN_TOKEN)
+    )
+
+
+@app.route("/admin/reset", methods=["POST"])
+def admin_reset():
+    """実際に削除する。削除前に必ず控えを取る。"""
+    check_admin_token()
+    from schedule_tools import backup_replies, reset_replies
+
+    backup_replies()
     result = reset_replies()
-    return f"<pre>{result}</pre>"
+    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+    undo = f"/admin/reset/restore?token={ADMIN_TOKEN}"
+    return (
+        f"<pre>{result}\n\n控えを保存しました。間違えた場合はすぐ戻せます。</pre>"
+        f'<p><a href="{undo}">元に戻す</a>　<a href="{panel}">管理画面に戻る</a></p>'
+    )
+
+
+@app.route("/admin/reset/restore", methods=["GET", "POST"])
+def admin_reset_restore():
+    """控えから元に戻す。GETは確認、POSTで実行。"""
+    check_admin_token()
+    from schedule_tools import restore_replies, backup_info
+
+    panel = f"/admin/panel?token={ADMIN_TOKEN}"
+
+    if request.method == "POST":
+        result = restore_replies()
+        return f"<pre>{result}</pre><p><a href=\"{panel}\">管理画面に戻る</a></p>"
+
+    info = backup_info()
+    if not info:
+        return f'<pre>戻せる控えがありません。</pre><p><a href="{panel}">管理画面に戻る</a></p>'
+
+    detail = "、".join(f"{l} {c}件" for l, c in info["counts"])
+    return (
+        f"<pre>{info['at'][:16].replace('T', ' ')} の控えに戻します。\n\n{detail}\n\n"
+        "今のデータは上書きされます。</pre>"
+        f'<form method="post" action="/admin/reset/restore">'
+        f'<input type="hidden" name="token" value="{ADMIN_TOKEN}">'
+        f'<button type="submit">この控えに戻す</button></form>'
+        f'<p><a href="{panel}">やめる</a></p>'
+    )
 
 
 @handler.add(FollowEvent)

@@ -337,12 +337,75 @@ def summarize_replies() -> str:
     return "\n".join(lines)
 
 
+# --- リセットと、その取り消し ------------------------------------------------
+#
+# 誤ってリセットすると回答を集め直すことになるため、消す前に必ず控えを取る。
+# 控えは同じUpstashの "reset_backup" に1世代だけ持つ（直前の状態に戻せれば十分）。
+
+RESET_KEYS = ("votes", "comments", "locations", "skips", "assignment")
+
+RESET_LABELS = {
+    "votes": "回答",
+    "comments": "連絡事項",
+    "locations": "教室の選択",
+    "skips": "参加できない人",
+    "assignment": "割り当て済みの枠",
+}
+
+
+def reset_counts() -> list[tuple[str, int]]:
+    """リセットで消えるものを (表示名, 件数) で返す。確認画面に出すため。"""
+    out = []
+    for key in RESET_KEYS:
+        value = load_json(key, default=[])
+        out.append((RESET_LABELS.get(key, key), len(value) if hasattr(value, "__len__") else 0))
+    return out
+
+
+def backup_replies() -> dict:
+    """消す直前の状態を控える。1世代だけ保持し、古い控えは上書きする。"""
+    from datetime import datetime, timezone
+
+    snapshot = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "data": {key: load_json(key, default=[]) for key in RESET_KEYS},
+    }
+    save_json("reset_backup", snapshot)
+    return snapshot
+
+
+def backup_info() -> dict:
+    """控えの有無と中身の件数。管理画面の表示用。"""
+    snapshot = load_json("reset_backup", default={})
+    if not isinstance(snapshot, dict) or not snapshot.get("data"):
+        return {}
+    data = snapshot["data"]
+    return {
+        "at": snapshot.get("at", ""),
+        "counts": [
+            (RESET_LABELS.get(k, k), len(v) if hasattr(v, "__len__") else 0)
+            for k, v in data.items()
+        ],
+    }
+
+
+def restore_replies() -> str:
+    """控えから元に戻す。リセットを取り消したいときに使う。"""
+    snapshot = load_json("reset_backup", default={})
+    if not isinstance(snapshot, dict) or not snapshot.get("data"):
+        return "戻せる控えがありません。"
+
+    restored = []
+    for key, value in snapshot["data"].items():
+        save_json(key, value)
+        restored.append(f"{RESET_LABELS.get(key, key)} {len(value) if hasattr(value, '__len__') else 0}件")
+    return "控えから元に戻しました。\n" + " / ".join(restored)
+
+
 def reset_replies() -> str:
-    save_json("votes", [])
-    save_json("comments", [])
-    save_json("locations", [])
-    save_json("skips", [])
-    save_json("assignment", [])
+    """回答データを消す。**先に backup_replies() を呼ぶこと。**"""
+    for key in RESET_KEYS:
+        save_json(key, [])
     return "回答データ（日程・教室・連絡事項・割り当て）をリセットしました。"
 
 
