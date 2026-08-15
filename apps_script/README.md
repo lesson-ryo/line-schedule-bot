@@ -1,7 +1,8 @@
 # Google Sheet song writer
 
 The teacher song-entry page works immediately with shared Redis storage. To
-write new songs directly to the repertoire Google Sheet, deploy `Code.gs` as a
+add, edit, archive, and republish songs directly in the repertoire Google Sheet,
+deploy `Code.gs` as a
 Google Apps Script web app and set these Render environment variables:
 
 - `REPERTOIRE_SHEET_WRITE_URL`
@@ -18,7 +19,10 @@ shared secret is checked on every write request.
 
 The repertoire sheet must use these columns in order:
 
-`ID / 楽器 / 形態 / 曲名 / アーティスト / Youtube 演奏動画 / メモ / ジャンル`
+`ID / 楽器 / 形態 / 曲名 / アーティスト / Youtube 演奏動画 / メモ / ジャンル / 公開状態`
 
 New songs are inserted directly below the header. Formatting and data
 validation are copied from the previous first song row before values are set.
+The first write safely adds the `公開状態` column when it is missing and applies
+the `公開 / 非公開` dropdown. Archiving never deletes or renumbers a song, so old
+carte progress remains linked to the same ID.
