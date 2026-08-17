@@ -1140,6 +1140,13 @@ def healthz():
         except Exception:
             # A reminder/storage failure must never make Render mark the app unhealthy.
             pass
+        try:
+            from github_backup import run_due_backup
+
+            run_due_backup()
+        except Exception:
+            # A backup failure must never make Render mark the app unhealthy either.
+            pass
     return "ok", 200
 
 
@@ -1186,6 +1193,40 @@ def admin_keepalive():
         f'<p><a href="{off}">今すぐ止める</a>　<a href="{panel}">管理画面に戻る</a></p>'
     )
 
+@app.route("/admin/backup", methods=["GET"])
+def admin_backup():
+    """Upstashデータを外部（GitHub）へバックアップする仕組みの状態確認。
+    ?run=1 を付けると今すぐ1回実行する。"""
+    check_admin_token()
+    import github_backup
+
+    panel = admin_link("panel")
+
+    if request.args.get("run"):
+        result = github_backup.run_backup(reason="manual")
+        back = admin_link("backup")
+        return f'<pre>{result}</pre><p><a href="{back}">状態を見る</a>　<a href="{panel}">管理画面に戻る</a></p>'
+
+    s = github_backup.status()
+    if not s.get("configured"):
+        body = "GitHubバックアップの設定（GITHUB_BACKUP_TOKEN / GITHUB_BACKUP_REPO）がされていません。"
+    else:
+        last = s.get("last_run") or {}
+        if last:
+            state = "成功" if last.get("ok") else f"失敗（{last.get('error', '')}）"
+            detail = f"{last.get('date', '?')}: {state}"
+        else:
+            detail = "まだ実行されていません"
+        body = "\n".join([
+            f"バックアップ先: {s['repo']}",
+            f"直近の実行: {detail}",
+        ])
+
+    run_now = admin_link("backup", run="1")
+    return (
+        f"<pre>{body}</pre>"
+        f'<p><a href="{run_now}">今すぐバックアップする</a>　<a href="{panel}">管理画面に戻る</a></p>'
+    )
 
 @app.route("/admin/panel", methods=["GET"])
 def admin_panel():
