@@ -522,7 +522,7 @@ def liff_candidates():
     candidates = load_json("candidates", default=[])
     return {
         "candidates": candidates,
-        "locations": LOCATIONS,
+        "locations": list(LOCATIONS),
         "deadline": format_date_ja(load_json("deadline", default="")),
         "comment_label": load_json("comment_label", default="") or "（任意）連絡事項やリクエストあれば",
     }
