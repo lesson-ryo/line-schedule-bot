@@ -12,6 +12,7 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 
 import hmac
 import os
+import threading
 import requests
 from datetime import datetime
 from urllib.parse import urlencode
@@ -1129,24 +1130,36 @@ loadMembers();
 """
 
 
-@app.route("/healthz", methods=["GET", "HEAD"])
-def healthz():
-    """Keepalive endpoint and lightweight scheduler for automatic reminders."""
-    if request.method == "GET":
+_background_lock = threading.Lock()
+
+
+def _run_background_jobs():
+    """Run due reminders and backups. Only one run at a time."""
+    if not _background_lock.acquire(blocking=False):
+        return  # 前回の処理がまだ動いている
+    try:
         try:
             from lesson_operations import run_due_automations
 
             run_due_automations(push_text_message)
-        except Exception:
-            # A reminder/storage failure must never make Render mark the app unhealthy.
-            pass
+        except Exception as exc:
+            print(f"[healthz] automation error: {exc}", flush=True)
         try:
             from github_backup import run_due_backup
 
             run_due_backup()
-        except Exception:
-            # A backup failure must never make Render mark the app unhealthy either.
-            pass
+        except Exception as exc:
+            print(f"[healthz] backup error: {exc}", flush=True)
+    finally:
+        _background_lock.release()
+
+
+@app.route("/healthz", methods=["GET", "HEAD"])
+def healthz():
+    """Keepalive endpoint. Answers immediately; reminders/backups run in the background
+    so a slow LINE/Redis/GitHub call never makes Render's 5-second health check fail."""
+    if request.method == "GET" and not _background_lock.locked():
+        threading.Thread(target=_run_background_jobs, daemon=True).start()
     return "ok", 200
 
 
