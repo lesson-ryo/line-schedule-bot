@@ -64,12 +64,12 @@ def _default_for(key: str):
 
 
 def _with_tenant(name: str, callback):
-    previous = getattr(g, "tenant", None)
-    g.tenant = name
-    try:
+    # 画面からでも、バックグラウンド（毎日の自動バックアップ）からでも動くように
+    # tenant_scope を使う（g はリクエスト中しか使えないため）。
+    from lesson_operations import tenant_scope
+
+    with tenant_scope(name):
         return callback()
-    finally:
-        g.tenant = previous
 
 
 def build_snapshot() -> dict:
