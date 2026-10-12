@@ -13,6 +13,7 @@ LINE公式アカウント 日程調整Bot - Webhookサーバー（タップ投�
 import hmac
 import os
 import threading
+import time
 import requests
 from datetime import datetime
 from urllib.parse import urlencode
@@ -1131,6 +1132,8 @@ loadMembers();
 
 
 _background_lock = threading.Lock()
+_last_background_start = None
+BACKGROUND_INTERVAL_SECONDS = int(os.environ.get("BACKGROUND_INTERVAL_SECONDS", "600"))
 
 
 def _run_background_jobs():
@@ -1158,8 +1161,14 @@ def _run_background_jobs():
 def healthz():
     """Keepalive endpoint. Answers immediately; reminders/backups run in the background
     so a slow LINE/Redis/GitHub call never makes Render's 5-second health check fail."""
+    global _last_background_start
     if request.method == "GET" and not _background_lock.locked():
-        threading.Thread(target=_run_background_jobs, daemon=True).start()
+        now = time.monotonic()
+        # Renderは数秒おきに確認するので、Redisの読み書き（無料枠）を節約するため
+        # 自動送信・バックアップの確認は BACKGROUND_INTERVAL_SECONDS（既定10分）に1回だけ。
+        if _last_background_start is None or now - _last_background_start >= BACKGROUND_INTERVAL_SECONDS:
+            _last_background_start = now
+            threading.Thread(target=_run_background_jobs, daemon=True).start()
     return "ok", 200
 
 
