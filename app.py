@@ -49,11 +49,11 @@ LOCATIONS = LocalProxy(lambda: list(get_tenant().locations))
 # このBotは日程調整専用なので、それ以外の連絡は本アカウントへ誘導する。
 # 環境変数 AUTO_REPLY で差し替え可能（地域ごとに連絡先が違うため）。
 DEFAULT_AUTO_REPLY = "\n".join([
-    "このアカウントは日程調整の専用です。",
+    "このアカウントは、レッスンの予定と曲の記録用です。",
     "",
-    "日程のご回答は、お送りしたメッセージの「日程を選ぶ」ボタンからお願いします。",
+    "画面下の「メニュー」から、次のレッスンの確認・日程の回答・マイレパートリー・曲のリクエストができます。",
     "",
-    "レッスンに関するご連絡・ご質問は、お手数ですが本アカウントまでお願いします。",
+    "レッスンのご相談・ご質問は、メニューの「先生に連絡」からメインのアカウントへお願いします。",
 ])
 AUTO_REPLY = LocalProxy(lambda: get_tenant().auto_reply)
 
@@ -1751,7 +1751,7 @@ def handle_follow(event):
                 reply_token=event.reply_token,
                 messages=[
                     TextMessage(
-                        text=f"{display_name}さん、友だち追加ありがとうございます！日程調整の際にご案内します。"
+                        text=f"{display_name}さん、友だち追加ありがとうございます！\n\n画面下の「メニュー」から、次のレッスンの確認や曲の記録ができます。日程調整の際は、こちらからご案内します。"
                     )
                 ],
             )
@@ -1790,7 +1790,7 @@ def handle_postback(event):
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    """テキストが届いたら、日程調整専用である旨と連絡先を案内する。
+    """テキストが届いたら、このアカウントの使い方と連絡先を案内する。
     Reply APIなので何通返しても無料通数は消費しない。"""
     user_id = event.source.user_id
 
