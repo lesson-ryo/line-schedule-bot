@@ -232,6 +232,10 @@ def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
             if absent:
                 lines.append(f"　※ この時間に参加できない方: {', '.join(absent)}")
 
+        fee = str(slot.get("fee", "") or "").strip()
+        if fee:
+            lines.append(f"　料金: {fee}")
+
         lines.append("")
         lines.append("よろしくお願いします。")
 

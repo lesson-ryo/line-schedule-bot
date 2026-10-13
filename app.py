@@ -1355,7 +1355,10 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
   h1 { font-size: 20px; }
   .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 16px; }
   .day { font-weight: 600; color: #06783b; background: #f6fbf8; padding: 8px 10px; border-radius: 6px; margin: 14px 0 6px; }
-  .slot { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid #f2f2f2; }
+  .slot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid #f2f2f2; }
+  .slot input.fee { flex-basis: 100%; margin-left: 126px; padding: 7px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+  .slot.changed input.fee { border-color: #06C755; }
+  @media (max-width: 560px) { .slot input.fee { margin-left: 0; } }
   .slot .tm { width: 116px; font-size: 14px; white-space: nowrap; }
   .slot select { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
   .slot .loc { font-size: 12px; color: #888; white-space: nowrap; }
@@ -1371,7 +1374,7 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
 <body>
 <h1>割り当ての調整</h1>
 <div class="card">
-  <div class="muted">担当を入れ替えたり、空きに変更できます。変更した行は緑色になります。</div>
+  <div class="muted">担当を入れ替えたり、空きに変更できます。変更した行は緑色になります。<br>「料金」に入れた内容は、確定のお知らせに「料金: 〜」として載ります（空欄なら載りません）。</div>
   <div id="list"></div>
   <div style="margin-top:16px">
     <button onclick="save()">この内容で保存する</button>
@@ -1399,6 +1402,7 @@ function render() {
       + '<span class="tm">' + s.time + '-' + s.end + '</span>'
       + '<select data-i="' + i + '" onchange="mark(' + i + ')">' + opts + '</select>'
       + '<span class="loc">' + (s.location || '') + '</span>'
+      + '<input class="fee" data-f="' + i + '" maxlength="200" oninput="mark(' + i + ')" placeholder="料金（例：レッスン料 4,500円＋部屋代 459円＝4,959円）">'
       + '</div>';
   });
   box.innerHTML = html;
@@ -1406,14 +1410,19 @@ function render() {
     const sel = document.querySelector('select[data-i="' + i + '"]');
     sel.value = s.name || '';
     sel.dataset.orig = s.name || '';
+    const fee = document.querySelector('input[data-f="' + i + '"]');
+    fee.value = s.fee || '';
+    fee.dataset.orig = s.fee || '';
   });
 }
 function mark(i) {
   const sel = document.querySelector('select[data-i="' + i + '"]');
-  document.getElementById('slot' + i).classList.toggle('changed', sel.value !== sel.dataset.orig);
+  const fee = document.querySelector('input[data-f="' + i + '"]');
+  document.getElementById('slot' + i).classList.toggle('changed', sel.value !== sel.dataset.orig || fee.value !== fee.dataset.orig);
 }
 async function save() {
   const names = Array.from(document.querySelectorAll('select[data-i]')).map(s => s.value);
+  const fees = Array.from(document.querySelectorAll('input[data-f]')).map(f => f.value.trim());
   const dup = names.filter((n, i) => n && names.indexOf(n) !== i);
   if (dup.length && !confirm('同じ人が複数の枠に入っています（' + [...new Set(dup)].join('、') + '）。このまま保存しますか？')) return;
   const box = document.getElementById('msg');
@@ -1422,7 +1431,7 @@ async function save() {
     const res = await fetch('/admin/schedule/save?token=' + encodeURIComponent(TOKEN), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ names: names }),
+      body: JSON.stringify({ names: names, fees: fees }),
     });
     const r = await res.json();
     box.className = res.ok ? 'ok' : 'err';
@@ -1500,14 +1509,15 @@ def admin_schedule_save():
     check_admin_token()
     body = request.get_json(silent=True) or {}
     names = body.get("names", [])
+    fees = body.get("fees")
 
     schedule = load_json("assignment", default=[])
-    if len(names) != len(schedule):
+    if len(names) != len(schedule) or (fees is not None and len(fees) != len(schedule)):
         return {"error": "画面が古くなっています。読み込み直してください。"}, 400
 
     directory = _entity_directory()
     updated = []
-    for slot, name in zip(schedule, names):
+    for index, (slot, name) in enumerate(zip(schedule, names)):
         name = (name or "").strip()
         if not name:
             continue  # 空きにした枠は削除
@@ -1521,6 +1531,12 @@ def admin_schedule_save():
         slot["location"] = info["location"] or slot.get("location", "")
         slot["absent"] = []
         slot["manual"] = True
+        if fees is not None:
+            fee = str(fees[index] or "").strip()[:200]
+            if fee:
+                slot["fee"] = fee
+            else:
+                slot.pop("fee", None)
         updated.append(slot)
 
     from lesson_operations import cross_tenant_conflicts

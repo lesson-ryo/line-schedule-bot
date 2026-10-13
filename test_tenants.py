@@ -730,3 +730,32 @@ def test_carte_pages_include_home_card_and_teacher_note_editor(client):
 
     assert 'id="teacherNote"' in carte.ADMIN_HTML
     assert "teacher_note:teacherNote.value" in carte.ADMIN_HTML
+
+
+def test_schedule_fee_is_saved_and_included_in_notification(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [{"user_id": "U1", "display_name": "生徒A"}])
+        storage.save_json("votes", [{"user_id": "U1", "display_name": "生徒A", "candidate_index": 1}])
+        storage.save_json("candidates", ["2099-08-21 10:00"])
+        storage.save_json(
+            "assignment",
+            [{"day": "2099-08-21", "time": "10:00", "end": "11:00", "name": "生徒A",
+              "member_ids": ["U1"], "is_group": False, "location": "吹田教室"}],
+        )
+
+    response = http.post(
+        "/kansai/admin/schedule/save?token=kansai-admin",
+        json={"names": ["生徒A"], "fees": ["レッスン料 5,000円＋部屋代 990円＝5,990円"]},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["schedule"][0]["fee"] == "レッスン料 5,000円＋部屋代 990円＝5,990円"
+
+    preview = http.get("/kansai/admin/notify?token=kansai-admin").get_data(as_text=True)
+    assert "料金: レッスン料 5,000円＋部屋代 990円＝5,990円" in preview
+
+    # 料金を空にすると、お知らせからも消える。
+    http.post("/kansai/admin/schedule/save?token=kansai-admin", json={"names": ["生徒A"], "fees": [""]})
+    assert "料金:" not in http.get("/kansai/admin/notify?token=kansai-admin").get_data(as_text=True)
