@@ -628,7 +628,10 @@ def reminder_preview(tenant: str, kind: str, today: date | None = None) -> dict:
         responded = {str(row.get("user_id") or "") for row in votes}
         responded.update(str(value) for value in skips)
         targets = [m for m in members if str(m.get("user_id") or "") not in responded]
-        lines = ["日程調整のご回答がまだ確認できていません。", "お手数ですが、先にお送りした「日程を選ぶ」ボタンからご回答をお願いします。"]
+        lines = ["日程調整のご回答がまだ確認できていません。", "お手数ですが、下のリンクからご回答をお願いします。"]
+        liff_id = TENANTS[tenant].liff_id
+        if liff_id:
+            lines.append(f"▼ 日程を回答する\nhttps://liff.line.me/{liff_id}")
         if deadline:
             lines.append(f"回答期限: {deadline}")
         return {
