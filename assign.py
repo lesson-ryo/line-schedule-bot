@@ -9,7 +9,9 @@
 - 開始時刻は30分単位（10:00 だけでなく 10:30 開始も可）
 - グループは「参加できる人数が最も多い時間帯」に入れる（全員でなくてもよい）
 - 使う日数をできるだけ少なくし、同じ日の中では連続した時間になるようにする
-- 教室が複数ある場合、同じ日に別の教室へ移る際は1時間以上空ける（移動時間）
+- 教室が複数ある場合、同じ日に別の教室へ移る際は教室どうしの移動時間を空ける
+  （西中島↔新大阪 30分、それ以外 60分。TRAVEL_MINUTES で設定）
+- 同じ日の教室移動はできるだけ少なく（1日あたり移動は最大1回）
 
 回答フォームは1時間刻みのままで、30分単位になるのは割り当ての段階だけ。
 「10:00 と 11:00 に○」＝「10:00〜12:00 は空いている」とみなして
@@ -17,9 +19,18 @@
 """
 
 from collections import Counter
+import time
 
-# 別の教室へ移るときに空ける時間（時間単位）
-TRAVEL_GAP = 2
+# 別の教室へ移るときに空ける時間（分）。教室名に含まれる言葉で判定する。
+# 表にない組み合わせは DEFAULT_TRAVEL_MINUTES。
+TRAVEL_MINUTES = {
+    frozenset({"西中島", "新大阪"}): 30,
+}
+DEFAULT_TRAVEL_MINUTES = 60
+
+# 「移動2回まで」を試すときの計算時間の上限（秒）。超えたら移動1回までの案だけで続ける。
+TWO_MOVES_TIME_LIMIT = 6.0
+_two_moves_deadline = 0.0
 
 # この教室を選んだ人は、どの教室の時間帯にも入れられる
 ANY_LOCATION = "どちらでもOK"
@@ -129,15 +140,36 @@ def _base_location(label: str) -> str:
     return label.split("（")[0] if label else ""
 
 
-def _resolve_location(location: str, side: str | None, loc_names: list[str]) -> str:
+def _resolve_location(location: str, seg_loc: str) -> str:
     """「どちらでもOK」の人が実際にどの教室の時間帯に入ったかを名前にする"""
     if location != ANY_LOCATION:
         return location
-    if side == "a" and len(loc_names) >= 1:
-        return f"{loc_names[0]}（どちらでもOK）"
-    if side == "b" and len(loc_names) >= 2:
-        return f"{loc_names[1]}（どちらでもOK）"
-    return ANY_LOCATION
+    return f"{seg_loc}（どちらでもOK）" if seg_loc else ANY_LOCATION
+
+
+def _place_key(name: str) -> str:
+    """教室名から地名のキーワードを取り出す（'西中島教室（どちらでもOK）' → '西中島'）"""
+    base = _base_location(name)
+    for pair in TRAVEL_MINUTES:
+        for word in pair:
+            if word in base:
+                return word
+    return base
+
+
+def travel_minutes(a: str, b: str) -> int:
+    """教室aから教室bへの移動に見ておく時間（分）。同じ教室なら0。"""
+    ka, kb = _place_key(a), _place_key(b)
+    if not ka or not kb or ka == kb:
+        return 0
+    return TRAVEL_MINUTES.get(frozenset({ka, kb}), DEFAULT_TRAVEL_MINUTES)
+
+
+def travel_units(a: str, b: str) -> int:
+    """移動時間を30分単位のコマ数にする（切り上げ）"""
+    minutes = travel_minutes(a, b)
+    per = 60 // UNITS_PER_HOUR
+    return -(-minutes // per)
 
 
 def _covered_hours(start_unit: int, length: int):
@@ -145,32 +177,34 @@ def _covered_hours(start_unit: int, length: int):
     return sorted({(start_unit + k) // UNITS_PER_HOUR for k in range(length)})
 
 
-def _starts_for(entity, length, hour_to_slot, free_units, allowed_hours):
-    """その組をこの日に入れられる開始位置（30分単位）の一覧"""
+def _starts_in(entity, length, hour_to_slot, free_units, allowed_units):
+    """その組を、指定した時間（30分単位の集合）の中に入れられる開始位置の一覧"""
     starts = []
-    hours = sorted(hour_to_slot.keys())
-    if not hours:
+    if not allowed_units:
         return starts
-
-    first_unit = hours[0] * UNITS_PER_HOUR
-    last_unit = (hours[-1] + 1) * UNITS_PER_HOUR - 1
-
-    for u in range(first_unit, last_unit - length + 2):
-        block = list(range(u, u + length))
-        if not all(b in free_units for b in block):
+    for u in range(min(allowed_units), max(allowed_units) - length + 2):
+        block = range(u, u + length)
+        if not all(b in free_units and b in allowed_units for b in block):
             continue
         hrs = _covered_hours(u, length)
-        if not all(h in hour_to_slot and h in allowed_hours for h in hrs):
-            continue
-        if not all(hour_to_slot[h] in entity["avail"] for h in hrs):
+        if not all(h in hour_to_slot and hour_to_slot[h] in entity["avail"] for h in hrs):
             continue
         starts.append(u)
     return starts
 
 
-def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a):
+def _fits(entity_loc: str, segment_loc: str, loc_a: str) -> bool:
+    """その組（希望教室）を、この教室の時間帯に入れてよいか"""
+    loc = entity_loc or loc_a
+    if loc == ANY_LOCATION or not segment_loc:
+        return True
+    return loc == segment_loc
+
+
+def _fill_day(pending, entities, lengths, hour_to_slot, segments, loc_a):
     """1日分を埋める。入れられる場所が少ない組から順に、早い時間へ詰めていく。
-    戻り値: [(組ID, 開始unit, 長さ), ...]"""
+    segments: [(教室名, 30分単位の集合), ...]（教室ごとの時間帯）
+    戻り値: [(組ID, 開始unit, 長さ, 入った教室名), ...]"""
     free_units = set()
     for h in hour_to_slot:
         for k in range(UNITS_PER_HOUR):
@@ -183,37 +217,34 @@ def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
         options = []
         for idx, eid in enumerate(remaining):
             e = entities[eid]
-            loc = e["location"] or loc_a
-            if loc == ANY_LOCATION:
-                allowed = hours_a | hours_b  # どちらの教室の時間帯でもよい
-            else:
-                allowed = hours_a if loc == loc_a else hours_b
-            starts = _starts_for(e, lengths[eid], hour_to_slot, free_units, allowed)
+            starts = []
+            for seg_loc, seg_units in segments:
+                if _fits(e["location"], seg_loc, loc_a):
+                    starts.extend(
+                        (u, seg_loc)
+                        for u in _starts_in(e, lengths[eid], hour_to_slot, free_units, seg_units)
+                    )
             if starts:
+                starts.sort()
                 options.append((len(starts), idx, eid, starts))
         if not options:
             break
 
-        options.sort(key=lambda x: (x[0], not entities[x[2]]["is_group"], x[3][0]))
+        options.sort(key=lambda x: (x[0], not entities[x[2]]["is_group"], x[3][0][0]))
         _, idx, eid, starts = options[0]
         e = entities[eid]
         length = lengths[eid]
 
         if e["is_group"]:
             # 参加できる人数が最も多くなる開始位置を選ぶ（同点なら早い時間）
-            def attendance(u):
+            def attendance(item):
+                u = item[0]
                 return min(e["attend"][hour_to_slot[h]] for h in _covered_hours(u, length))
-            start = sorted(starts, key=lambda u: (-attendance(u), u))[0]
+            start, seg_loc = sorted(starts, key=lambda it: (-attendance(it), it[0]))[0]
         else:
-            start = starts[0]
+            start, seg_loc = starts[0]
 
-        # 「どちらでもOK」の場合、実際にどちらの教室の時間帯に入ったかを記録する
-        side = None
-        if (e["location"] or loc_a) == ANY_LOCATION:
-            hrs = _covered_hours(start, length)
-            side = "a" if all(h in hours_a for h in hrs) else "b"
-
-        placed.append((eid, start, length, side))
+        placed.append((eid, start, length, seg_loc))
         for k in range(length):
             free_units.discard(start + k)
         remaining.pop(idx)
@@ -221,23 +252,56 @@ def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
     return placed
 
 
-def _day_plans(hours: list[int]):
-    """その日の時間帯を2つの教室にどう割り振るかの候補を列挙する。"""
-    plans = [(set(hours), set()), (set(), set(hours))]
-    if not hours:
+def _day_plans(hours: list[int], loc_names: list[str], multi_loc: bool, loc_a: str, max_moves: int = 1):
+    """その日の時間帯を教室にどう割り振るかの候補を列挙する。
+    1日の教室は「1か所」か「前半と後半の2か所（移動1回）」が基本。
+    max_moves=2 のときは「3つの時間帯（移動2回）」も候補にする。
+    教室が変わるところは、その2教室の移動時間ぶん間を空ける。"""
+    units = sorted({h * UNITS_PER_HOUR + k for h in hours for k in range(UNITS_PER_HOUR)})
+    if not multi_loc:
+        return [[(loc_a, set(units))]]
+    plans = [[(loc, set(units))] for loc in loc_names]
+    if not units:
         return plans
-    for x in range(min(hours), max(hours) + 1):
-        early = {h for h in hours if h <= x}
-        late = {h for h in hours if h >= x + TRAVEL_GAP}
-        if early and late:
-            plans.append((early, late))
-            plans.append((late, early))
+    for first in loc_names:
+        for second in loc_names:
+            if first == second:
+                continue
+            gap = travel_units(first, second)
+            for x in range(units[0] + 1, units[-1] + 1):
+                early = {u for u in units if u < x}
+                late = {u for u in units if u >= x + gap}
+                if early and late:
+                    plans.append([(first, early), (second, late)])
+    if max_moves >= 2 and time.monotonic() < _two_moves_deadline:
+        # 3つの時間帯に分けるときは、区切りを毎正時にして候補数を抑える
+        hour_units = [u for u in units if u % UNITS_PER_HOUR == 0]
+        for first in loc_names:
+            for second in loc_names:
+                if first == second:
+                    continue
+                for third in loc_names:
+                    if third == second:
+                        continue
+                    g1 = travel_units(first, second)
+                    g2 = travel_units(second, third)
+                    for x in hour_units:
+                        early = {u for u in units if u < x}
+                        if not early:
+                            continue
+                        for y in hour_units:
+                            if y <= x + g1:
+                                continue
+                            mid = {u for u in units if x + g1 <= u < y}
+                            late = {u for u in units if u >= y + g2}
+                            if mid and late:
+                                plans.append([(first, early), (second, mid), (third, late)])
     return plans
 
 
-def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a):
+def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a, loc_names, max_moves=1):
     """指定した長さで全日程の割り当てを試す。
-    戻り値: (日付 → [(組ID, 開始unit, 長さ)], 残った予約数)"""
+    戻り値: (日付 → [(組ID, 開始unit, 長さ, 教室名)], 残った予約数)"""
     pending = []
     for eid, e in entities.items():
         pending.extend([eid] * e["bookings"])
@@ -249,20 +313,28 @@ def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a):
             break
         hour_to_slot = slots_by_day[day]
         hours = sorted(hour_to_slot.keys())
-        plans = _day_plans(hours) if multi_loc else [(set(hours), set(hours))]
+        plans = _day_plans(hours, loc_names, multi_loc, loc_a, max_moves)
 
         best = None
-        for hours_a, hours_b in plans:
-            placed = _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
+        seen = set()
+        for segments in plans:
+            placed = _fill_day(pending, entities, lengths, hour_to_slot, segments, loc_a)
             if not placed:
                 continue
+            key = tuple(sorted(placed))
+            if key in seen:
+                continue
+            seen.add(key)
             used = [u for _, u, _, _ in placed]
+            seq = [loc for _, _, _, loc in sorted(placed, key=lambda p: p[1])]
+            moves = sum(1 for i in range(1, len(seq)) if seq[i] != seq[i - 1])
             attend = sum(
                 entities[eid]["attend"][hour_to_slot[h]]
                 for eid, u, ln, _ in placed
                 for h in _covered_hours(u, ln)
             )
-            score = (-len(placed), -attend, max(used) - min(used), min(used))
+            # 多く入る ＞ 移動が少ない ＞ 参加人数が多い ＞ 短い時間にまとまる ＞ 早い
+            score = (-len(placed), moves, -attend, max(used) - min(used), min(used))
             if best is None or score < best[0]:
                 best = (score, placed)
 
@@ -283,7 +355,20 @@ def auto_assign(
     locations: dict | None = None,
     groups: dict | None = None,
 ) -> dict:
-    """割り当てを実行して結果を返す。"""
+    """割り当てを実行して結果を返す。
+    まず「1日の教室移動は1回まで」で組み、入りきらない人がいるときだけ
+    「移動2回まで」も試して、多く入るほうを採用する。"""
+    result = _auto_assign(candidates, votes, quotas, locations, groups, max_moves=1)
+    if result.get("ok") and result["shortfall"] and len(result.get("locations_used", [])) >= 2:
+        global _two_moves_deadline
+        _two_moves_deadline = time.monotonic() + TWO_MOVES_TIME_LIMIT
+        more = _auto_assign(candidates, votes, quotas, locations, groups, max_moves=2)
+        if more.get("ok") and more["assigned"] > result["assigned"]:
+            return more
+    return result
+
+
+def _auto_assign(candidates, votes, quotas, locations, groups, max_moves):
     avail, names = build_availability(candidates, votes)
     entities = build_entities(avail, names, quotas, locations, groups)
 
@@ -317,7 +402,7 @@ def auto_assign(
         eid: (GROUP_UNITS if e["is_group"] else INDIVIDUAL_UNITS)
         for eid, e in entities.items()
     }
-    placement, left = _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a)
+    placement, left = _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a, loc_names, max_moves)
     shortened: set = set()
 
     def try_with(short_set):
@@ -329,7 +414,7 @@ def auto_assign(
             )
             for eid, e in entities.items()
         }
-        return _run(entities, trial, candidates, days, slots_by_day, multi_loc, loc_a)
+        return _run(entities, trial, candidates, days, slots_by_day, multi_loc, loc_a, loc_names, max_moves)
 
     # 収まらなければ、グループを順に1.5時間へ短縮していく
     # （1組だけでは足りず、複数まとめて短縮して初めて収まる場合があるため累積で試す）
@@ -354,7 +439,7 @@ def auto_assign(
     schedule = []
     assigned_count: Counter = Counter()
     for day in days:
-        for eid, start, length, side in sorted(placement.get(day, []), key=lambda x: x[1]):
+        for eid, start, length, seg_loc in sorted(placement.get(day, []), key=lambda x: x[1]):
             e = entities[eid]
             assigned_count[eid] += 1
             hour_to_slot = slots_by_day[day]
@@ -373,7 +458,7 @@ def auto_assign(
                     "time": unit_to_time(start),
                     "end": unit_to_time(start + length),
                     "name": e["name"],
-                    "location": _resolve_location(e["location"], side, loc_names),
+                    "location": _resolve_location(e["location"], seg_loc),
                     "is_group": e["is_group"],
                     "shortened": eid in shortened,
                     "attend": attend,
@@ -432,7 +517,7 @@ def check_conflicts(result: dict) -> list[str]:
                 if not la or not lb or la == lb:
                     continue
                 gap_units = b["start_unit"] - a_end
-                if gap_units < (TRAVEL_GAP - 1) * UNITS_PER_HOUR:
+                if gap_units < travel_units(la, lb):
                     problems.append(
                         f"{day} {a['end']}({a['location']}) から "
                         f"{b['time']}({b['location']}) の移動時間が足りません"
@@ -450,7 +535,7 @@ def format_result(result: dict) -> str:
         f"割り当て: {result['assigned']}/{result['needed']}組　使用日数: {len(result['used_days'])}日"
     )
     if len(result.get("locations_used", [])) >= 2:
-        lines.append(f"※ 教室が変わる前後は{TRAVEL_GAP - 1}時間以上空けています")
+        lines.append("※ 教室が変わる前後は移動時間（西中島↔新大阪 30分、吹田との間 60分）を空けています")
     if result.get("shortened"):
         lines.append(f"※ 全員を収めるため次のグループを1.5時間に短縮: {', '.join(result['shortened'])}")
     lines.append("")
