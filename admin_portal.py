@@ -89,19 +89,19 @@ ARTIST_SUGGESTIONS = {
     410: "スピッツ",
     409: "KAN",
     408: "あいみょん",
-    407: "The Police",
-    406: "The Police",
+    407: "STING / The Police",
+    406: "STING / The Police",
     405: "Elvis Presley",
     404: "坂本九",
     403: "Bette Midler",
     402: "Eric Clapton",
     400: "竹内まりや",
     394: "一青窈",
-    389: "荒井由実",
+    389: "松任谷由実 / 荒井由実",
     373: "浦島太郎（桐谷健太）",
     371: "John Lennon",
-    364: "Frank Sinatra",
-    363: "Frank Sinatra",
+    364: "ジャズスタンダード",
+    363: "ジャズスタンダード",
     355: "The Beatles",
     353: "Dusty Springfield",
     352: "Billy Joel",
@@ -113,7 +113,17 @@ ARTIST_SUGGESTIONS = {
     342: "Vaundy",
 }
 
-TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% if notice %}<p class="muted" style="padding:8px 12px;border:1px solid var(--line,#e3e7ea);border-radius:8px">{{notice}}</p>{% endif %}{% if picks %}<section class="section"><h2>アーティスト名の候補<span class="tag">{{picks|length}}曲</span></h2><p class="muted">曲名から推測した候補です。<b>合っているものだけチェックして登録</b>してください。チェックを外したものは何も起きません。</p><form method="post" action="/admin/tasks/artists"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>候補</th></tr>{% for m in picks %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{suggestions[m.id]}}</td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を登録する</button></p></form></section>{% endif %}{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main><script>(function(){ var L=[['/admin','講師ホーム'],['/admin/tasks','やること'],['/kansai/admin/panel','関西の日程'],['/kanto/admin/panel','関東の日程'],['/admin/lessons','変更・キャンセル'],['/admin/automations','自動通知'],['/admin/calendar','Googleカレンダー'],['/kanto/admin/carte','生徒カルテ'],['/kanto/admin/carte/next','次回まとめ'],['/kanto/admin/carte/requests','リクエスト曲'],['/kanto/admin/carte/ranking','ランキング'],['/admin/attendance','出欠・月謝'],['/admin/songs','曲の管理'],['/admin/maintenance','状態・バックアップ']]; function go(){ var h=document.querySelector('header'); if(!h) return; if(document.getElementById('gnav')) return; var w=document.createElement('div'); w.id='gnav'; w.style.cssText='display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap'; if(!h.querySelector('a[href="/admin"]')){ var a=document.createElement('a'); a.href='/admin'; a.textContent='講師ホーム'; a.style.cssText='font-size:13px;white-space:nowrap'; w.appendChild(a); } var s=document.createElement('select'); s.setAttribute('aria-label','ページ移動'); s.style.cssText='height:34px;max-width:170px;border:1px solid var(--line,#bec5c9);border-radius:7px;padding:0 8px;font-size:13px;background:transparent;color:inherit'; var o='<option value="">ページ移動…</option>'; for(var i=0;i<L.length;i++){ o+='<option value="'+L[i][0]+'">'+L[i][1]+'</option>'; } s.innerHTML=o; s.onchange=function(){ if(s.value) location.href=s.value; }; w.appendChild(s); h.appendChild(w); h.style.display='flex'; h.style.alignItems='center'; h.style.flexWrap='wrap'; h.style.gap='10px'; } if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',go); } else { go(); } })();</script></body></html>"""
+# すでに入っているアーティスト名のうち、誤記・表記ゆれを直す候補。
+ARTIST_FIXES = {
+    430: "ケイスケサカモト",
+    399: "井上陽水",
+    386: "Carpenters",
+    384: "Eagles",
+    43: "松任谷由実 / 荒井由実",
+}
+
+
+TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% if notice %}<p class="muted" style="padding:8px 12px;border:1px solid var(--line,#e3e7ea);border-radius:8px">{{notice}}</p>{% endif %}{% if fixes %}<section class="section"><h2>アーティスト名の修正<span class="tag">{{fixes|length}}件</span></h2><p class="muted">誤記や表記ゆれを見つけたものです。<b>上書きされます。</b>直すものだけチェックしてください。</p><form method="post" action="/admin/tasks/artists"><input type="hidden" name="force" value="1"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>現在</th><th>修正後</th></tr>{% for m in fixes %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.artist}}</td><td><b>{{repairs[m.id]}}</b></td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を修正する</button></p></form></section>{% endif %}{% if picks %}<section class="section"><h2>アーティスト名の候補<span class="tag">{{picks|length}}曲</span></h2><p class="muted">曲名から推測した候補です。<b>合っているものだけチェックして登録</b>してください。チェックを外したものは何も起きません。</p><form method="post" action="/admin/tasks/artists"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>候補</th></tr>{% for m in picks %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{suggestions[m.id]}}</td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を登録する</button></p></form></section>{% endif %}{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main><script>(function(){ var L=[['/admin','講師ホーム'],['/admin/tasks','やること'],['/kansai/admin/panel','関西の日程'],['/kanto/admin/panel','関東の日程'],['/admin/lessons','変更・キャンセル'],['/admin/automations','自動通知'],['/admin/calendar','Googleカレンダー'],['/kanto/admin/carte','生徒カルテ'],['/kanto/admin/carte/next','次回まとめ'],['/kanto/admin/carte/requests','リクエスト曲'],['/kanto/admin/carte/ranking','ランキング'],['/admin/attendance','出欠・月謝'],['/admin/songs','曲の管理'],['/admin/maintenance','状態・バックアップ']]; function go(){ var h=document.querySelector('header'); if(!h) return; if(document.getElementById('gnav')) return; var w=document.createElement('div'); w.id='gnav'; w.style.cssText='display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap'; if(!h.querySelector('a[href="/admin"]')){ var a=document.createElement('a'); a.href='/admin'; a.textContent='講師ホーム'; a.style.cssText='font-size:13px;white-space:nowrap'; w.appendChild(a); } var s=document.createElement('select'); s.setAttribute('aria-label','ページ移動'); s.style.cssText='height:34px;max-width:170px;border:1px solid var(--line,#bec5c9);border-radius:7px;padding:0 8px;font-size:13px;background:transparent;color:inherit'; var o='<option value="">ページ移動…</option>'; for(var i=0;i<L.length;i++){ o+='<option value="'+L[i][0]+'">'+L[i][1]+'</option>'; } s.innerHTML=o; s.onchange=function(){ if(s.value) location.href=s.value; }; w.appendChild(s); h.appendChild(w); h.style.display='flex'; h.style.alignItems='center'; h.style.flexWrap='wrap'; h.style.gap='10px'; } if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',go); } else { go(); } })();</script></body></html>"""
 
 
 def create_admin_portal_blueprint():
@@ -580,6 +590,12 @@ def create_admin_portal_blueprint():
             },
         ]
         picks = [m for m in items if not m.get("artist") and m.get("id") in ARTIST_SUGGESTIONS]
+        fixes = [
+            m
+            for m in items
+            if m.get("id") in ARTIST_FIXES
+            and str(m.get("artist", "")).strip() != ARTIST_FIXES[m["id"]]
+        ]
         return render_template_string(
             TASKS_HTML,
             style=BASE_STYLE,
@@ -587,6 +603,8 @@ def create_admin_portal_blueprint():
             groups=groups,
             picks=picks,
             suggestions=ARTIST_SUGGESTIONS,
+            fixes=fixes,
+            repairs=ARTIST_FIXES,
             notice=request.args.get("notice", ""),
             total=len(items),
         )
@@ -597,6 +615,7 @@ def create_admin_portal_blueprint():
         from carte import load_materials, update_material
 
         picked = [int(x) for x in request.form.getlist("ids") if str(x).isdigit()]
+        force = request.form.get("force", "") == "1"
         materials = {m["id"]: m for m in load_materials(force=True, include_inactive=True)}
         remaining = 0
         if len(picked) > 8:
@@ -606,8 +625,13 @@ def create_admin_portal_blueprint():
         failed = []
         for song_id in picked:
             current = materials.get(song_id)
-            name = ARTIST_SUGGESTIONS.get(song_id, "")
-            if not current or not name or current.get("artist"):
+            if force:
+                name = ARTIST_FIXES.get(song_id, "")
+            else:
+                name = ARTIST_SUGGESTIONS.get(song_id, "")
+            if not current or not name:
+                continue
+            if not force and current.get("artist"):
                 continue
             values = {
                 key: current.get(key, "")
@@ -619,7 +643,7 @@ def create_admin_portal_blueprint():
                 failed.append("ID %s: %s" % (song_id, error))
             else:
                 done += 1
-        message = "%d曲にアーティスト名を登録しました。" % done
+        message = ("%d曲を修正しました。" if force else "%d曲にアーティスト名を登録しました。") % done
         if remaining:
             message += " 残り%d曲は、もう一度ボタンを押してください。" % remaining
         if failed:
