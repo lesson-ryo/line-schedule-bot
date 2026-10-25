@@ -598,6 +598,14 @@ def dashboard_data() -> dict:
         carte_members = _as_list(load_json("carte:members", default=[]))
         progress = _as_list(load_json("carte:progress", default=[]))
         requests = _as_list(load_json("carte:requests", default=[]))
+    _carte_by_name = {}
+    for _m in carte_members:
+        _nm = str(_m.get("display_name", "")).strip()
+        if _nm and _nm not in _carte_by_name:
+            _carte_by_name[_nm] = _m.get("user_id", "")
+    for _item in upcoming:
+        _item["carte_id"] = _carte_by_name.get(str(_item.get("name", "")).strip(), "")
+
     carte = {
         "students": len(carte_members),
         "progress": len(progress),
