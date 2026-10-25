@@ -123,8 +123,50 @@ ARTIST_FIXES = {
 }
 
 
-TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% if notice %}<p class="muted" style="padding:8px 12px;border:1px solid var(--line,#e3e7ea);border-radius:8px">{{notice}}</p>{% endif %}{% if fixes %}<section class="section"><h2>アーティスト名の修正<span class="tag">{{fixes|length}}件</span></h2><p class="muted">誤記や表記ゆれを見つけたものです。<b>上書きされます。</b>直すものだけチェックしてください。</p><form method="post" action="/admin/tasks/artists"><input type="hidden" name="force" value="1"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>現在</th><th>修正後</th></tr>{% for m in fixes %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.artist}}</td><td><b>{{repairs[m.id]}}</b></td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を修正する</button></p></form></section>{% endif %}{% if picks %}<section class="section"><h2>アーティスト名の候補<span class="tag">{{picks|length}}曲</span></h2><p class="muted">曲名から推測した候補です。<b>合っているものだけチェックして登録</b>してください。チェックを外したものは何も起きません。</p><form method="post" action="/admin/tasks/artists"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>候補</th></tr>{% for m in picks %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{suggestions[m.id]}}</td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を登録する</button></p></form></section>{% endif %}{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main><script>(function(){ var L=[['/admin','講師ホーム'],['/admin/tasks','やること'],['/kansai/admin/panel','関西の日程'],['/kanto/admin/panel','関東の日程'],['/admin/lessons','変更・キャンセル'],['/admin/automations','自動通知'],['/admin/calendar','Googleカレンダー'],['/kanto/admin/carte','生徒カルテ'],['/kanto/admin/carte/next','次回まとめ'],['/kanto/admin/carte/requests','リクエスト曲'],['/kanto/admin/carte/ranking','ランキング'],['/admin/attendance','出欠・月謝'],['/admin/songs','曲の管理'],['/admin/maintenance','状態・バックアップ']]; function go(){ var h=document.querySelector('header'); if(!h) return; if(document.getElementById('gnav')) return; var w=document.createElement('div'); w.id='gnav'; w.style.cssText='display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap'; if(!h.querySelector('a[href="/admin"]')){ var a=document.createElement('a'); a.href='/admin'; a.textContent='講師ホーム'; a.style.cssText='font-size:13px;white-space:nowrap'; w.appendChild(a); } var s=document.createElement('select'); s.setAttribute('aria-label','ページ移動'); s.style.cssText='height:34px;max-width:170px;border:1px solid var(--line,#bec5c9);border-radius:7px;padding:0 8px;font-size:13px;background:transparent;color:inherit'; var o='<option value="">ページ移動…</option>'; for(var i=0;i<L.length;i++){ o+='<option value="'+L[i][0]+'">'+L[i][1]+'</option>'; } s.innerHTML=o; s.onchange=function(){ if(s.value) location.href=s.value; }; w.appendChild(s); h.appendChild(w); h.style.display='flex'; h.style.alignItems='center'; h.style.flexWrap='wrap'; h.style.gap='10px'; } if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',go); } else { go(); } })();</script></body></html>"""
+TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% if notice %}<p class="muted" style="padding:8px 12px;border:1px solid var(--line,#e3e7ea);border-radius:8px">{{notice}}</p>{% endif %}{% if groups_c %}<section class="section"><h2>同じ曲のまとめ候補<span class="tag">{{groups_c|length}}組</span></h2><p class="muted">Key違い・simple版などを1曲としてまとめる候補です。<b>同じ曲のものだけチェック</b>してください。別の曲が混ざっていたらチェックを外します。まとめても元のデータは変わりません。</p><form method="post" action="/admin/tasks/groups"><table class="small-table"><tr><th></th><th>まとめ名</th><th>曲</th></tr>{% for g in groups_c %}<tr><td><input type="checkbox" name="keys" value="{{g.key}}"{% if g.key in approved %} checked{% endif %}></td><td><b>{{g.title}}</b><br><span class="muted">{{g.rows|length}}曲{% if g.variant %} / 要確認{% endif %}</span></td><td>{% for m in g.rows %}<div>{{m.id}} {{m.title}}</div>{% endfor %}</td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした組をまとめる</button></p></form></section>{% endif %}{% if fixes %}<section class="section"><h2>アーティスト名の修正<span class="tag">{{fixes|length}}件</span></h2><p class="muted">誤記や表記ゆれを見つけたものです。<b>上書きされます。</b>直すものだけチェックしてください。</p><form method="post" action="/admin/tasks/artists"><input type="hidden" name="force" value="1"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>現在</th><th>修正後</th></tr>{% for m in fixes %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.artist}}</td><td><b>{{repairs[m.id]}}</b></td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を修正する</button></p></form></section>{% endif %}{% if picks %}<section class="section"><h2>アーティスト名の候補<span class="tag">{{picks|length}}曲</span></h2><p class="muted">曲名から推測した候補です。<b>合っているものだけチェックして登録</b>してください。チェックを外したものは何も起きません。</p><form method="post" action="/admin/tasks/artists"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>候補</th></tr>{% for m in picks %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{suggestions[m.id]}}</td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を登録する</button></p></form></section>{% endif %}{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main><script>(function(){ var L=[['/admin','講師ホーム'],['/admin/tasks','やること'],['/kansai/admin/panel','関西の日程'],['/kanto/admin/panel','関東の日程'],['/admin/lessons','変更・キャンセル'],['/admin/automations','自動通知'],['/admin/calendar','Googleカレンダー'],['/kanto/admin/carte','生徒カルテ'],['/kanto/admin/carte/next','次回まとめ'],['/kanto/admin/carte/requests','リクエスト曲'],['/kanto/admin/carte/ranking','ランキング'],['/admin/attendance','出欠・月謝'],['/admin/songs','曲の管理'],['/admin/maintenance','状態・バックアップ']]; function go(){ var h=document.querySelector('header'); if(!h) return; if(document.getElementById('gnav')) return; var w=document.createElement('div'); w.id='gnav'; w.style.cssText='display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap'; if(!h.querySelector('a[href="/admin"]')){ var a=document.createElement('a'); a.href='/admin'; a.textContent='講師ホーム'; a.style.cssText='font-size:13px;white-space:nowrap'; w.appendChild(a); } var s=document.createElement('select'); s.setAttribute('aria-label','ページ移動'); s.style.cssText='height:34px;max-width:170px;border:1px solid var(--line,#bec5c9);border-radius:7px;padding:0 8px;font-size:13px;background:transparent;color:inherit'; var o='<option value="">ページ移動…</option>'; for(var i=0;i<L.length;i++){ o+='<option value="'+L[i][0]+'">'+L[i][1]+'</option>'; } s.innerHTML=o; s.onchange=function(){ if(s.value) location.href=s.value; }; w.appendChild(s); h.appendChild(w); h.style.display='flex'; h.style.alignItems='center'; h.style.flexWrap='wrap'; h.style.gap='10px'; } if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',go); } else { go(); } })();</script></body></html>"""
 
+
+def _song_base(title: str) -> str:
+    """曲名から比較用のキーを作る。全角スペースと連続スペースをそろえる。"""
+    text = str(title or "").replace("\u3000", " ").strip()
+    return " ".join(text.split()).lower()
+
+
+def song_group_candidates(items):
+    """同じ曲とみられる組み合わせを拾う。自動では統合せず候補として返す。"""
+    by_base = {}
+    for item in items:
+        by_base.setdefault(_song_base(item.get("title", "")), []).append(item)
+
+    bases = sorted([b for b in by_base if b], key=lambda b: (len(b), b))
+    taken = set()
+    groups = []
+    for base in bases:
+        if base in taken:
+            continue
+        members = list(by_base[base])
+        has_variant = False
+        for other in bases:
+            if other == base or other in taken:
+                continue
+            if other.startswith(base) and other[len(base) : len(base) + 1] == " ":
+                members.extend(by_base[other])
+                taken.add(other)
+                has_variant = True
+        if len(members) < 2:
+            continue
+        taken.add(base)
+        members.sort(key=lambda m: m.get("id", 0))
+        groups.append(
+            {
+                "key": base,
+                "title": by_base[base][0].get("title", ""),
+                "rows": members,
+                "variant": has_variant,
+            }
+        )
+    groups.sort(key=lambda g: (0 if g["variant"] else 1, -len(g["rows"]), g["key"]))
+    return groups
 
 def create_admin_portal_blueprint():
     bp = Blueprint("teacher_admin", __name__)
@@ -564,7 +606,8 @@ def create_admin_portal_blueprint():
     @teacher_only
     def tasks():
         from carte import load_materials
-        from lesson_operations import dashboard_data
+        from lesson_operations import dashboard_data, tenant_scope
+        from storage import load_json
 
         items = [m for m in load_materials() if m.get("active", True)]
         groups = [
@@ -590,6 +633,11 @@ def create_admin_portal_blueprint():
             },
         ]
         picks = [m for m in items if not m.get("artist") and m.get("id") in ARTIST_SUGGESTIONS]
+        with tenant_scope("kanto"):
+            approved = load_json("carte:song_groups", default={})
+        if not isinstance(approved, dict):
+            approved = {}
+        groups_c = song_group_candidates(items)
         fixes = [
             m
             for m in items
@@ -605,6 +653,8 @@ def create_admin_portal_blueprint():
             suggestions=ARTIST_SUGGESTIONS,
             fixes=fixes,
             repairs=ARTIST_FIXES,
+            groups_c=groups_c,
+            approved=approved,
             notice=request.args.get("notice", ""),
             total=len(items),
         )
@@ -648,6 +698,24 @@ def create_admin_portal_blueprint():
             message += " 残り%d曲は、もう一度ボタンを押してください。" % remaining
         if failed:
             message += " 失敗 " + str(len(failed)) + "件: " + " / ".join(failed[:2])
+        return _notice_redirect("/admin/tasks", message)
+
+    @bp.post("/admin/tasks/groups")
+    @teacher_only
+    def tasks_groups():
+        from carte import load_materials
+        from lesson_operations import tenant_scope
+        from storage import save_json
+
+        keys = set(request.form.getlist("keys"))
+        items = [m for m in load_materials() if m.get("active", True)]
+        saved = {}
+        for group in song_group_candidates(items):
+            if group["key"] in keys:
+                saved[group["key"]] = [m["id"] for m in group["rows"]]
+        with tenant_scope("kanto"):
+            save_json("carte:song_groups", saved)
+        message = "%d組をまとめました。" % len(saved)
         return _notice_redirect("/admin/tasks", message)
 
     return bp
