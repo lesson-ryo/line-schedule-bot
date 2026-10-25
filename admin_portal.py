@@ -103,7 +103,7 @@ ARTIST_SUGGESTIONS = {
     364: "ジャズスタンダード",
     363: "ジャズスタンダード",
     355: "The Beatles",
-    353: "Dusty Springfield",
+    353: "ジャズスタンダード",
     352: "Billy Joel",
     349: "土居康宏",
     348: "BTS",
