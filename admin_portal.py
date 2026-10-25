@@ -76,7 +76,44 @@ LESSONS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><me
 ATTENDANCE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>出欠・月謝</title><style>{{style}}</style></head><body><header><h1>出欠・月謝</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<form method="get" action="/admin/attendance" class="form"><label>表示する月</label><div class="row"><input type="month" name="month" value="{{data.month}}"><button>この月を表示</button></div></form><h2 class="section-title">月間まとめ</h2><div class="grid">{% for student in data.students %}<section class="card"><h2>{{student.display_name}}</h2><p>出席 {{student.counts.attended}}回 / 予定 {{student.counts.scheduled}}回 / 欠席 {{student.counts.absent}}回 / キャンセル {{student.counts.cancelled}}回</p><form method="post" action="/admin/attendance/tuition"><input type="hidden" name="month" value="{{data.month}}"><input type="hidden" name="user_id" value="{{student.user_id}}"><label>月謝</label><input type="number" name="amount" min="0" value="{{student.amount}}"><label><input type="checkbox" name="paid" value="1"{% if student.paid %} checked{% endif %} style="width:auto;height:auto"> 入金済み</label><label>月謝メモ</label><input name="note" value="{{student.note}}" maxlength="500"><div class="actions"><button>月謝を保存</button></div></form></section>{% endfor %}</div><h2 class="section-title">レッスンごとの出欠</h2>{% if data.rows %}<table class="small-table"><tr><th>日時</th><th>地域・生徒</th><th>出欠・メモ</th></tr>{% for row in data.rows %}<tr><td>{{row.date_value}}<br>{{row.time}}〜{{row.end}}</td><td><span class="tag">{{row.label}}</span><br><b>{{row.display_name}}</b>{% if row.location %}<br><span class="muted">{{row.location}}</span>{% endif %}</td><td><form method="post" action="/admin/attendance/record"><input type="hidden" name="month" value="{{data.month}}"><input type="hidden" name="record_id" value="{{row.id}}"><select name="status">{% for key,label in data.statuses.items() %}<option value="{{key}}"{% if row.status==key %} selected{% endif %}>{{label}}</option>{% endfor %}</select><input name="note" value="{{row.note}}" maxlength="500" placeholder="メモ（任意）" style="margin-top:6px"><button style="margin-top:6px">保存</button></form></td></tr>{% endfor %}</table>{% else %}<div class="card"><p class="muted">この月のレッスン記録はありません。</p></div>{% endif %}</main></body></html>"""
 
 
-TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
+# 曲名から推測したアーティスト候補。講師がタスクページで確認し、選んだものだけ登録する。
+ARTIST_SUGGESTIONS = {
+    427: "はっぴいえんど",
+    426: "坂本九",
+    424: "花は咲くプロジェクト",
+    417: "井上あずみ",
+    416: "坂本龍一",
+    414: "B.J. Thomas",
+    413: "Carole King",
+    412: "Eagles",
+    410: "スピッツ",
+    409: "KAN",
+    408: "あいみょん",
+    407: "The Police",
+    406: "The Police",
+    405: "Elvis Presley",
+    404: "坂本九",
+    403: "Bette Midler",
+    402: "Eric Clapton",
+    400: "竹内まりや",
+    394: "一青窈",
+    389: "荒井由実",
+    373: "浦島太郎（桐谷健太）",
+    371: "John Lennon",
+    364: "Frank Sinatra",
+    363: "Frank Sinatra",
+    355: "The Beatles",
+    353: "Dusty Springfield",
+    352: "Billy Joel",
+    349: "土居康宏",
+    348: "BTS",
+    347: "BTS",
+    346: "絢香",
+    344: "Carpenters",
+    342: "Vaundy",
+}
+
+TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% if notice %}<p class="muted" style="padding:8px 12px;border:1px solid var(--line,#e3e7ea);border-radius:8px">{{notice}}</p>{% endif %}{% if picks %}<section class="section"><h2>アーティスト名の候補<span class="tag">{{picks|length}}曲</span></h2><p class="muted">曲名から推測した候補です。<b>合っているものだけチェックして登録</b>してください。チェックを外したものは何も起きません。</p><form method="post" action="/admin/tasks/artists"><table class="small-table"><tr><th></th><th>ID</th><th>曲名</th><th>候補</th></tr>{% for m in picks %}<tr><td><input type="checkbox" name="ids" value="{{m.id}}" checked></td><td>{{m.id}}</td><td>{{m.title}}</td><td>{{suggestions[m.id]}}</td></tr>{% endfor %}</table><p><button class="button" type="submit">チェックした曲を登録する</button></p></form></section>{% endif %}{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
 
 
 def create_admin_portal_blueprint():
@@ -542,12 +579,45 @@ def create_admin_portal_blueprint():
                 "rows": [m for m in items if not m.get("genre")],
             },
         ]
+        picks = [m for m in items if not m.get("artist") and m.get("id") in ARTIST_SUGGESTIONS]
         return render_template_string(
             TASKS_HTML,
             style=BASE_STYLE,
             dashboard=dashboard_data(),
             groups=groups,
+            picks=picks,
+            suggestions=ARTIST_SUGGESTIONS,
+            notice=request.args.get("notice", ""),
             total=len(items),
         )
+
+    @bp.post("/admin/tasks/artists")
+    @teacher_only
+    def tasks_artists():
+        from carte import load_materials, update_material
+
+        picked = [int(x) for x in request.form.getlist("ids") if str(x).isdigit()]
+        materials = {m["id"]: m for m in load_materials(force=True, include_inactive=True)}
+        done = 0
+        failed = []
+        for song_id in picked:
+            current = materials.get(song_id)
+            name = ARTIST_SUGGESTIONS.get(song_id, "")
+            if not current or not name or current.get("artist"):
+                continue
+            values = {
+                key: current.get(key, "")
+                for key in ("title", "instrument", "kind", "video", "note", "genre")
+            }
+            values["artist"] = name
+            item, error = update_material(song_id, values, "update")
+            if error:
+                failed.append("ID %s: %s" % (song_id, error))
+            else:
+                done += 1
+        message = "%d曲にアーティスト名を登録しました。" % done
+        if failed:
+            message += " 失敗 " + str(len(failed)) + "件: " + " / ".join(failed[:2])
+        return _notice_redirect("/admin/tasks", message)
 
     return bp
