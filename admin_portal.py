@@ -76,7 +76,7 @@ LESSONS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><me
 ATTENDANCE_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>出欠・月謝</title><style>{{style}}</style></head><body><header><h1>出欠・月謝</h1><a href="/admin">講師ホームに戻る</a></header><main>{% if notice %}<div class="notice">{{notice}}</div>{% endif %}<form method="get" action="/admin/attendance" class="form"><label>表示する月</label><div class="row"><input type="month" name="month" value="{{data.month}}"><button>この月を表示</button></div></form><h2 class="section-title">月間まとめ</h2><div class="grid">{% for student in data.students %}<section class="card"><h2>{{student.display_name}}</h2><p>出席 {{student.counts.attended}}回 / 予定 {{student.counts.scheduled}}回 / 欠席 {{student.counts.absent}}回 / キャンセル {{student.counts.cancelled}}回</p><form method="post" action="/admin/attendance/tuition"><input type="hidden" name="month" value="{{data.month}}"><input type="hidden" name="user_id" value="{{student.user_id}}"><label>月謝</label><input type="number" name="amount" min="0" value="{{student.amount}}"><label><input type="checkbox" name="paid" value="1"{% if student.paid %} checked{% endif %} style="width:auto;height:auto"> 入金済み</label><label>月謝メモ</label><input name="note" value="{{student.note}}" maxlength="500"><div class="actions"><button>月謝を保存</button></div></form></section>{% endfor %}</div><h2 class="section-title">レッスンごとの出欠</h2>{% if data.rows %}<table class="small-table"><tr><th>日時</th><th>地域・生徒</th><th>出欠・メモ</th></tr>{% for row in data.rows %}<tr><td>{{row.date_value}}<br>{{row.time}}〜{{row.end}}</td><td><span class="tag">{{row.label}}</span><br><b>{{row.display_name}}</b>{% if row.location %}<br><span class="muted">{{row.location}}</span>{% endif %}</td><td><form method="post" action="/admin/attendance/record"><input type="hidden" name="month" value="{{data.month}}"><input type="hidden" name="record_id" value="{{row.id}}"><select name="status">{% for key,label in data.statuses.items() %}<option value="{{key}}"{% if row.status==key %} selected{% endif %}>{{label}}</option>{% endfor %}</select><input name="note" value="{{row.note}}" maxlength="500" placeholder="メモ（任意）" style="margin-top:6px"><button style="margin-top:6px">保存</button></form></td></tr>{% endfor %}</table>{% else %}<div class="card"><p class="muted">この月のレッスン記録はありません。</p></div>{% endif %}</main></body></html>"""
 
 
-TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.items|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.items %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.items[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.items|length > 300 %}<p class="muted">ほか {{g.items|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
+TASKS_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>タスク</title><style>{{style}}.tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#eef2f4;color:#4a5560;font-size:12px}.small-table{width:100%;border-collapse:collapse;font-size:13px}.small-table th,.small-table td{border-bottom:1px solid #e3e7ea;padding:6px 8px;text-align:left}.small-table th{color:#687078;font-weight:600}</style></head><body><header><h1>タスク</h1><a class="button sub" href="/admin">講師ホームへ</a></header><main><section class="hero"><div><h2>未入力・未対応のまとめ</h2><p>公開中の曲 {{total}}曲が対象です。上から順に片付ければ、生徒側の使い勝手が上がります。</p></div></section><section class="section"><h2>未対応のリクエスト<span class="tag">{{dashboard.carte.open_requests}}件</span></h2><p class="muted">生徒から届いた曲のリクエストです。</p><p><a class="button sub" href="/kanto/admin/carte/requests">リクエスト一覧を開く</a></p></section>{% for g in groups %}<section class="section"><h2>{{g.title}}<span class="tag">{{g.rows|length}}曲</span></h2><p class="muted">{{g.note}}</p>{% if g.rows %}<table class="small-table"><tr><th>ID</th><th>曲名</th><th>楽器</th><th></th></tr>{% for m in g.rows[:300] %}<tr><td>{{m.id}}</td><td>{{m.title}}</td><td>{{m.instrument}}</td><td><a href="/admin/songs?edit_id={{m.id}}">編集</a></td></tr>{% endfor %}</table>{% if g.rows|length > 300 %}<p class="muted">ほか {{g.rows|length - 300}}曲</p>{% endif %}{% else %}<p class="muted">ありません。</p>{% endif %}</section>{% endfor %}</main></body></html>"""
 
 
 def create_admin_portal_blueprint():
@@ -524,22 +524,22 @@ def create_admin_portal_blueprint():
             {
                 "title": "動画がない曲",
                 "note": "生徒が開いても動画が出ません。動画を追加するか、非公開にしてください。",
-                "items": [m for m in items if not m.get("video")],
+                "rows": [m for m in items if not m.get("video")],
             },
             {
                 "title": "アーティスト名が未記入",
                 "note": "アーティスト名での検索ができません。",
-                "items": [m for m in items if not m.get("artist")],
+                "rows": [m for m in items if not m.get("artist")],
             },
             {
                 "title": "形態が未設定",
                 "note": "弾き語り・ソロ弾きなどの絞り込みに使われます。",
-                "items": [m for m in items if not m.get("kind")],
+                "rows": [m for m in items if not m.get("kind")],
             },
             {
                 "title": "ジャンルが未設定",
                 "note": "ジャンルでの絞り込みに使われます。",
-                "items": [m for m in items if not m.get("genre")],
+                "rows": [m for m in items if not m.get("genre")],
             },
         ]
         return render_template_string(
