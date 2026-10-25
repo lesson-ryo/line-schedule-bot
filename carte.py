@@ -255,13 +255,15 @@ def update_material(material_id: int, values: dict | None = None, action: str = 
             if not video_id:
                 return None, "YouTube動画のURLを入力してください。"
         normalized = _normalized_title(title)
+        title_changed = normalized != _normalized_title(current.get("title", ""))
+        video_changed = video != str(current.get("video", "")).strip()
         for item in materials:
             if item.get("id") == material_id:
                 continue
-            if _normalized_title(item.get("title", "")) == normalized:
+            if title_changed and _normalized_title(item.get("title", "")) == normalized:
                 return None, f"同じ曲名がすでにあります（ID {item['id']}）。"
             existing_video = str(item.get("video", "")).strip()
-            if video and (existing_video == video or (video_id and _youtube_video_id(existing_video) == video_id)):
+            if video_changed and video and (existing_video == video or (video_id and _youtube_video_id(existing_video) == video_id)):
                 return None, f"同じ動画URLがすでにあります（ID {item['id']}）。"
         updated.update(
             title=title,
