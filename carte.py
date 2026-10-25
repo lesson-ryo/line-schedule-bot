@@ -675,17 +675,18 @@ function setGroups(g){groupOf={};groupRows={};groupRep={};var byId={};for(var i=
   var rep=ids[0];for(var i=0;i<ids.length;i++){if(baseOf(byId[ids[i]].title)===k){rep=ids[i];break}}groupRep[k]=rep}}
 function countsAsOne(m){var k=groupOf[m.id];return !k||groupRep[k]===m.id}
 function toggleGroup(enc){var k=decodeURIComponent(enc);if(openGroups.has(k)){openGroups.delete(k)}else{openGroups.add(k)}draw()}
-function collapseGroups(xs){var out=[],seen={},byId={};repIds={};childIds={};
+function collapseGroups(xs){var out=[],seen={},byId={},allById={};repIds={};childIds={};
+ for(var i=0;i<materials.length;i++){allById[materials[i].id]=materials[i]}
  for(var i=0;i<xs.length;i++){byId[xs[i].id]=xs[i]}
  for(var i=0;i<xs.length;i++){var m=xs[i],k=groupOf[m.id];
   if(!k){out.push(m);continue}
   if(seen[k])continue;seen[k]=1;
   var ids=groupRows[k]||[],members=[];
-  for(var j=0;j<ids.length;j++){if(byId[ids[j]])members.push(byId[ids[j]])}
-  var rep=byId[groupRep[k]]||members[0]||m;repIds[rep.id]=k;out.push(rep);
+  for(var j=0;j<ids.length;j++){if(allById[ids[j]])members.push(allById[ids[j]])}
+  var rep=byId[groupRep[k]]||m;repIds[rep.id]=k;out.push(rep);
   if(openGroups.has(k)){for(var j=0;j<members.length;j++){if(members[j].id!==rep.id){childIds[members[j].id]=1;out.push(members[j])}}}}
  return out}
-function groupBadge(m){var k=repIds[m.id];if(!k)return "";var n=(groupRows[k]||[]).length;if(n<2)return "";var open=openGroups.has(k);return '<button type="button" class="gexp" onclick="event.stopPropagation();toggleGroup(&#39;'+encodeURIComponent(k)+'&#39;)">'+(open?"閉じる":"＋"+(n-1)+"バージョン")+'</button>'}
+function groupBadge(m){var k=repIds[m.id];if(!k)return "";var n=(groupRows[k]||[]).length;if(n<2)return "";var open=openGroups.has(k);return '<button type="button" class="gexp" onclick="event.stopPropagation();toggleGroup(&#39;'+encodeURIComponent(k)+'&#39;)">'+(open?"閉じる":n+"バージョン")+'</button>'}
 function songClass(m){return childIds[m.id]?" gchild":""}
 function sortList(xs){var s=(document.getElementById('sortBy')||{}).value||'recent';var t=function(m){return m.title||''};var ar=function(m){return m.artist||''};var up=function(m){return (progress[m.id]||{}).updated_at||''};var col=function(a,b){return String(a).localeCompare(String(b),'ja')};
 if(s==='id')return xs.slice().sort(function(a,b){return b.id-a.id});
