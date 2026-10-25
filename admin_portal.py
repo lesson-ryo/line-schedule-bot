@@ -708,12 +708,13 @@ def create_admin_portal_blueprint():
         all_materials = load_materials(force=True, include_inactive=True)
         materials = {m["id"]: m for m in all_materials}
         remaining = 0
-        if len(picked) > 25:
-            remaining = len(picked) - 25
-            picked = picked[:25]
         done = 0
         failed = []
-        for song_id in picked:
+        started = time.monotonic()
+        for index, song_id in enumerate(picked):
+            if time.monotonic() - started > 18:
+                remaining = len(picked) - index
+                break
             current = materials.get(song_id)
             if force:
                 name = ARTIST_FIXES.get(song_id, "")
