@@ -598,6 +598,10 @@ def create_admin_portal_blueprint():
 
         picked = [int(x) for x in request.form.getlist("ids") if str(x).isdigit()]
         materials = {m["id"]: m for m in load_materials(force=True, include_inactive=True)}
+        remaining = 0
+        if len(picked) > 8:
+            remaining = len(picked) - 8
+            picked = picked[:8]
         done = 0
         failed = []
         for song_id in picked:
@@ -616,6 +620,8 @@ def create_admin_portal_blueprint():
             else:
                 done += 1
         message = "%d曲にアーティスト名を登録しました。" % done
+        if remaining:
+            message += " 残り%d曲は、もう一度ボタンを押してください。" % remaining
         if failed:
             message += " 失敗 " + str(len(failed)) + "件: " + " / ".join(failed[:2])
         return _notice_redirect("/admin/tasks", message)
