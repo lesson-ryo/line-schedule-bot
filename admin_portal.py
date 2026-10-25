@@ -705,11 +705,12 @@ def create_admin_portal_blueprint():
 
         picked = [int(x) for x in request.form.getlist("ids") if str(x).isdigit()]
         force = request.form.get("force", "") == "1"
-        materials = {m["id"]: m for m in load_materials(force=True, include_inactive=True)}
+        all_materials = load_materials(force=True, include_inactive=True)
+        materials = {m["id"]: m for m in all_materials}
         remaining = 0
-        if len(picked) > 8:
-            remaining = len(picked) - 8
-            picked = picked[:8]
+        if len(picked) > 25:
+            remaining = len(picked) - 25
+            picked = picked[:25]
         done = 0
         failed = []
         for song_id in picked:
@@ -727,7 +728,7 @@ def create_admin_portal_blueprint():
                 for key in ("title", "instrument", "kind", "video", "note", "genre")
             }
             values["artist"] = name
-            item, error = update_material(song_id, values, "update")
+            item, error = update_material(song_id, values, "update", all_materials)
             if error:
                 failed.append("ID %s: %s" % (song_id, error))
             else:
