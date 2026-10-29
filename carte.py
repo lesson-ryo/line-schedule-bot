@@ -726,7 +726,7 @@ function renderChips(){
  let one=materials.filter(countsAsOne),ins=curIns(),kind=curKind();
  let insNames=[...new Set(one.map(m=>m.instrument).filter(Boolean))].sort(byOrder(INS_ORDER));
  insChips.innerHTML='<span class="lbl">楽器</span><div class="wrap">'+chip('',!ins,'すべて',one.length)+insNames.map(n=>chip(n,ins===n,n,one.filter(m=>m.instrument===n).length)).join('')+'</div>';
- let pool=one.filter(m=>!ins||m.instrument===ins);
+ let pool=materials.filter(m=>!ins||m.instrument===ins);
  let kinds=[...new Set(pool.map(m=>m.kind).filter(Boolean))].sort(byOrder(KIND_ORDER));
  let unset=pool.some(m=>!m.kind);
  kindChips.innerHTML='<span class="lbl">形態</span><div class="wrap">'+chip('',!kind,'すべて')+kinds.map(k=>chip(k,kind===k,k)).join('')+(unset?chip('__unset',kind==='__unset','未分類'):'')+'</div>';
