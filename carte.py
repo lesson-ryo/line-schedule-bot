@@ -732,7 +732,7 @@ function renderChips(){
  kindChips.innerHTML='<span class="lbl">形態</span><div class="wrap">'+chip('',!kind,'すべて')+kinds.map(k=>chip(k,kind===k,k)).join('')+(unset?chip('__unset',kind==='__unset','未分類'):'')+'</div>';
  let cd=0,cw=0,cn=0;for(let p of Object.values(progress)){if(isDone(p))cd++;else if(p?.status==='wanted')cw++;if(p?.next_lesson)cn++}
  const fc=(v,label,cls,sym,n)=>`<button type="button" class="chip${cls?' '+cls:''}${filter.value===v?' on':''}" data-v="${v}">${sym?`<span class="sym">${sym}</span>`:''}${label}${n?`<small>${n}</small>`:''}</button>`;
- filterChips.innerHTML='<span class="lbl">表示</span><div class="wrap">'+fc('all','すべて')+fc('history','レッスン履歴')+fc('next','次回','','',cn)+fc('popular','みんなの♡','st-pop')+'<span class="brk"></span>'+fc('done','実施済み','st-done','済',cd)+fc('wanted','やりたい','st-wanted','♡',cw)+fc('notdone','未実施','st-notdone','未')+'</div>';
+ filterChips.innerHTML='<span class="lbl">表示</span><div class="wrap">'+fc('all','すべて')+fc('next','次回')+fc('history','レッスン履歴')+fc('popular','みんなの♡','st-pop')+'<span class="brk"></span>'+fc('done','実施済み','st-done','済',cd)+fc('wanted','やりたい','st-wanted','♡',cw)+fc('notdone','未実施','st-notdone','未')+'</div>';
  artistChips.innerHTML=[...artists].map(n=>`<button type="button" class="achip" data-a="${esc(n)}">${esc(n)} ×</button>`).join('')+(artists.size>1?'<button type="button" class="achip clear" data-a="">すべて解除</button>':'');
  artBtn.textContent=artists.size?`アーティスト（${artists.size}）▾`:'アーティスト ▾';artBtn.classList.toggle('on',artists.size>0);
 }
