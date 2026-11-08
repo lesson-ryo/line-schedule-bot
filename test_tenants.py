@@ -152,6 +152,53 @@ def test_song_entry_rejects_duplicate_youtube_alias(client, monkeypatch):
     assert "同じ動画URL" in response.get_data(as_text=True)
 
 
+def test_song_entry_allows_same_title_with_different_instrument_or_kind(client, monkeypatch):
+    http, _, _ = client
+    secure = {"base_url": "https://localhost"}
+    http.post("/admin/login", data={"password": "master-admin"}, **secure)
+
+    import carte
+
+    existing = [{"id": 10, "title": "ハナミズキ", "instrument": "ギター", "kind": "弾き語り", "video": ""}]
+    monkeypatch.setattr(carte, "load_materials", lambda force=False: existing)
+
+    same = http.post(
+        "/admin/songs",
+        data={"title": "ハナミズキ", "instrument": "ギター", "kind": "弾き語り"},
+        **secure,
+    )
+    assert same.status_code == 400
+    assert "同じ曲名・楽器・形態" in same.get_data(as_text=True)
+
+    other_instrument = http.post(
+        "/admin/songs",
+        data={"title": "ハナミズキ", "instrument": "ウクレレ", "kind": "弾き語り"},
+        **secure,
+    )
+    assert other_instrument.status_code == 302
+
+    other_kind = http.post(
+        "/admin/songs",
+        data={"title": "ハナミズキ", "instrument": "ギター", "kind": "ソロ弾き"},
+        **secure,
+    )
+    assert other_kind.status_code == 302
+
+
+def test_song_edit_rejects_change_into_existing_same_song():
+    import carte
+
+    materials = [
+        {"id": 1, "title": "ハナミズキ", "instrument": "ギター", "kind": "弾き語り", "video": "", "active": True},
+        {"id": 2, "title": "ハナミズキ", "instrument": "ウクレレ", "kind": "弾き語り", "video": "", "active": True},
+    ]
+    item, error = carte.update_material(
+        2, {"title": "ハナミズキ", "instrument": "ギター", "kind": "弾き語り"}, "update", materials
+    )
+    assert item is None
+    assert "同じ曲名・楽器・形態" in error
+
+
 def test_teacher_song_entry_writes_to_google_sheet_when_configured(client, monkeypatch):
     http, _, _ = client
     secure = {"base_url": "https://localhost"}

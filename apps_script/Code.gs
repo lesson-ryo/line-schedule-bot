@@ -223,9 +223,13 @@ function doPost(e) {
     const video = String(body.video || '').trim();
     if (!title) return jsonResponse_({ok: false, error: 'title is required'});
     const videoId = youtubeId_(video);
+    // 曲名・楽器・形態の3つがすべて同じときだけ重複とみなす
+    const songKey_ = (t, ins, kind) =>
+      [normalized_(t), String(ins || '').trim(), String(kind || '').trim()].join('\u0001');
+    const newKey = songKey_(title, body.instrument, body.kind);
     for (const row of existing) {
       if (action === 'update' && Number(row[0]) === requestedId) continue;
-      if (normalized_(row[3]) === normalized_(title)) {
+      if (songKey_(row[3], row[1], row[2]) === newKey) {
         return jsonResponse_({ok: false, error: `duplicate title (ID ${row[0]})`});
       }
       const existingVideo = String(row[5] || '').trim();

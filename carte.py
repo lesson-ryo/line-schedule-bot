@@ -110,6 +110,11 @@ def _normalized_title(value: str) -> str:
     return "".join(value.split())
 
 
+def _song_key(title, instrument, kind) -> tuple[str, str, str]:
+    """同じ曲かどうかの判定用。曲名・楽器・形態の3つがすべて同じなら同じ曲とみなす。"""
+    return (_normalized_title(title), str(instrument or "").strip(), str(kind or "").strip())
+
+
 def _youtube_video_id(value: str) -> str:
     parsed = urlparse(str(value or "").strip())
     host = (parsed.hostname or "").lower()
@@ -155,10 +160,10 @@ def add_material(values: dict) -> tuple[dict | None, str, str]:
             return None, "", "YouTube動画のURLを入力してください。"
 
     materials = load_materials(force=True)
-    normalized = _normalized_title(title)
+    key = _song_key(title, instrument, kind)
     for item in materials:
-        if _normalized_title(item.get("title", "")) == normalized:
-            return None, "", f"同じ曲名がすでにあります（ID {item['id']}）。"
+        if _song_key(item.get("title", ""), item.get("instrument", ""), item.get("kind", "")) == key:
+            return None, "", f"同じ曲名・楽器・形態の曲がすでにあります（ID {item['id']}）。"
         existing_video = str(item.get("video", "")).strip()
         if video and (
             existing_video == video
@@ -254,14 +259,14 @@ def update_material(material_id: int, values: dict | None = None, action: str = 
             video_id = _youtube_video_id(video)
             if not video_id:
                 return None, "YouTube動画のURLを入力してください。"
-        normalized = _normalized_title(title)
-        title_changed = normalized != _normalized_title(current.get("title", ""))
+        key = _song_key(title, instrument, kind)
+        key_changed = key != _song_key(current.get("title", ""), current.get("instrument", ""), current.get("kind", ""))
         video_changed = video != str(current.get("video", "")).strip()
         for item in materials:
             if item.get("id") == material_id:
                 continue
-            if title_changed and _normalized_title(item.get("title", "")) == normalized:
-                return None, f"同じ曲名がすでにあります（ID {item['id']}）。"
+            if key_changed and _song_key(item.get("title", ""), item.get("instrument", ""), item.get("kind", "")) == key:
+                return None, f"同じ曲名・楽器・形態の曲がすでにあります（ID {item['id']}）。"
             existing_video = str(item.get("video", "")).strip()
             if video_changed and video and (existing_video == video or (video_id and _youtube_video_id(existing_video) == video_id)):
                 return None, f"同じ動画URLがすでにあります（ID {item['id']}）。"
