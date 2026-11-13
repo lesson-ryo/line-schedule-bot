@@ -862,5 +862,5 @@ def test_group_notification_lists_participants(client):
         ])
     text = items[0]["text"]
     assert "参加メンバー: 山田さん・佐藤さん" in text
-    assert "高橋さん" not in text.split("参加メンバー:")[1].split("\n")[0]
-    assert "この時間に参加できない方: 高橋" in text
+    assert "参加できない" not in text
+    assert "高橋" not in text

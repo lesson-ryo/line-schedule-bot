@@ -233,9 +233,6 @@ def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
             joined = [f"{members[u]}さん" for u in user_ids if u not in absent_ids and members.get(u)]
             if joined:
                 lines.append(f"　参加メンバー: {'・'.join(joined)}")
-            absent = [members.get(u, u) for u in slot.get("absent", []) if u]
-            if absent:
-                lines.append(f"　※ この時間に参加できない方: {', '.join(absent)}")
 
         fee = str(slot.get("fee", "") or "").strip()
         if fee:
