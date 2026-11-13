@@ -825,7 +825,7 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
     <button class="sub" onclick="toggleAll(false)">全員解除</button>
   </div>
   <div class="gnew">
-    <input id="newGroup" type="text" placeholder="新しいグループ名（例: 火曜A班）" onkeydown="if(event.key==='Enter'){addGroup();}">
+    <input id="newGroup" type="text" placeholder="新しいグループ名（例: 火曜A班）" onkeydown="if(event.key==='Enter'&&!event.isComposing&&event.keyCode!==229){event.preventDefault();addGroup();}">
     <button class="sub" onclick="addGroup()">グループを作る</button>
   </div>
   <div class="muted" style="margin:-4px 0 10px">グループの見出しのチェックで、そのグループ全員をまとめて選択・解除できます。各自の「グループ」を選ぶと移動します。</div>
