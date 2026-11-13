@@ -826,7 +826,7 @@ def test_groups_are_saved_from_member_panel(client):
 
     data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
     assert data["group_names"] == ["火曜A班", "空の班"]
-    assert [m["group"] for m in data["members"]] == ["火曜A班", ""]
+    assert [m["groups"] for m in data["members"]] == [["火曜A班"], []]
     assert [m["quota"] for m in data["members"]] == [2, 1]
 
 
@@ -864,3 +864,32 @@ def test_group_notification_lists_participants(client):
     assert "参加メンバー: 山田さん・佐藤さん" in text
     assert "参加できない" not in text
     assert "高橋" not in text
+
+
+def test_member_can_join_multiple_groups(client):
+    http, storage, _ = client
+    import assign
+    from lesson_operations import tenant_scope
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "山田"},
+            {"user_id": "U2", "display_name": "佐藤"},
+            {"user_id": "U3", "display_name": "高橋"},
+        ])
+    response = http.post(
+        "/kansai/admin/groups.json?token=kansai-admin",
+        json={"group_names": ["A班", "B班"], "groups": [["A班", "B班"], ["A班"], []], "quotas": [1, 1, 2]},
+    )
+    assert response.status_code == 200
+    data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
+    assert [m["groups"] for m in data["members"]] == [["A班", "B班"], ["A班"], []]
+
+    avail = {"U1": {0, 1}, "U2": {0}, "U3": {1}}
+    names = {"U1": "山田", "U2": "佐藤", "U3": "高橋"}
+    groups = {"U1": ["A班", "B班"], "U2": "A班", "U3": []}
+    entities = assign.build_entities(avail, names, {"U3": 2}, {}, groups)
+    assert sorted(entities["A班"]["member_ids"]) == ["U1", "U2"]
+    assert entities["B班"]["member_ids"] == ["U1"]
+    assert entities["U3"]["bookings"] == 2
+    assert "U1" not in entities

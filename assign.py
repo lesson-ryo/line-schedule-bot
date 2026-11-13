@@ -64,17 +64,32 @@ def build_availability(candidates: list[str], votes: list[dict]):
     return avail, names
 
 
+def group_list(value) -> list[str]:
+    """保存されたグループ（1人1つの文字列 or 複数のリスト）をリストにそろえる。"""
+    if isinstance(value, (list, tuple)):
+        items = value
+    else:
+        items = [value] if value else []
+    out = []
+    for item in items:
+        name = str(item or "").strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def build_entities(avail, names, quotas, locations, groups):
-    """個人とグループをまとめて「枠を取り合う組」として整理する。"""
+    """個人とグループをまとめて「枠を取り合う組」として整理する。
+    1人が複数のグループに入っている場合は、それぞれのグループに参加する。"""
     entities: dict[str, dict] = {}
 
     for user_id, slots in avail.items():
         if not slots:
             continue
-        group_name = (groups or {}).get(user_id, "").strip()
+        group_names = group_list((groups or {}).get(user_id, ""))
         quota = int((quotas or {}).get(user_id, 1))
 
-        if group_name:
+        for group_name in group_names:
             e = entities.setdefault(
                 group_name,
                 {
@@ -96,7 +111,7 @@ def build_entities(avail, names, quotas, locations, groups):
             loc = (locations or {}).get(user_id, "")
             if loc:
                 e["locs"].append(loc)
-        else:
+        if not group_names:
             if quota <= 0:
                 continue
             entities[user_id] = {
