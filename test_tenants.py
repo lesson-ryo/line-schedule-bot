@@ -806,3 +806,25 @@ def test_schedule_fee_is_saved_and_included_in_notification(client):
     # 料金を空にすると、お知らせからも消える。
     http.post("/kansai/admin/schedule/save?token=kansai-admin", json={"names": ["生徒A"], "fees": [""]})
     assert "料金:" not in http.get("/kansai/admin/notify?token=kansai-admin").get_data(as_text=True)
+
+
+def test_groups_are_saved_from_member_panel(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "生徒A"},
+            {"user_id": "U2", "display_name": "生徒B"},
+        ])
+
+    response = http.post(
+        "/kansai/admin/groups.json?token=kansai-admin",
+        json={"group_names": ["火曜A班", "空の班", "火曜A班"], "groups": ["火曜A班", "|"], "quotas": [2, 1]},
+    )
+    assert response.status_code == 200
+
+    data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
+    assert data["group_names"] == ["火曜A班", "空の班"]
+    assert [m["group"] for m in data["members"]] == ["火曜A班", ""]
+    assert [m["quota"] for m in data["members"]] == [2, 1]

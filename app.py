@@ -742,7 +742,21 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   .member { display: flex; justify-content: space-between; align-items: center; padding: 6px 4px; font-size: 14px; border-bottom: 1px solid #f4f4f4; }
   .member .qwrap { font-size: 12px; color: #888; white-space: nowrap; }
   .member .quota { width: 52px; padding: 5px; margin-left: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; text-align: center; }
-  .member .group { width: 110px; padding: 5px; margin: 0 10px 0 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  .member .group { width: 110px; padding: 5px; margin: 0 10px 0 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: #fff; }
+  .gnew { display: flex; gap: 8px; margin: 4px 0 12px; }
+  .gnew input { flex: 1; min-width: 0; padding: 8px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
+  .gbox { border: 1px solid #e3e3e3; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .gbox.solo { border-style: dashed; }
+  .ghead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: #f6fbf8; font-weight: 600; font-size: 14px; }
+  .gbox.solo .ghead { background: #fafafa; }
+  .ghead label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ghead .gcount { font-weight: 400; color: #888; font-size: 12px; }
+  .ghead .gdel { background: none; border: none; color: #b55; font-size: 12px; padding: 2px 4px; cursor: pointer; }
+  .gbox .member { padding: 6px 10px; flex-wrap: wrap; gap: 4px 8px; }
+  .gbox .member label { flex: 1 1 110px; min-width: 110px; }
+  .gbox .member .qwrap { margin-left: auto; }
+  .gbox .member .group { width: 104px; margin: 0 8px 0 4px; }
+  .gbox .gempty { padding: 8px 10px; font-size: 12px; color: #aaa; }
   .links a { font-size: 13px; margin-right: 14px; }
 </style>
 </head>
@@ -810,6 +824,11 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
     <button class="sub" onclick="toggleAll(true)">全員選択</button>
     <button class="sub" onclick="toggleAll(false)">全員解除</button>
   </div>
+  <div class="gnew">
+    <input id="newGroup" type="text" placeholder="新しいグループ名（例: 火曜A班）" onkeydown="if(event.key==='Enter'){addGroup();}">
+    <button class="sub" onclick="addGroup()">グループを作る</button>
+  </div>
+  <div class="muted" style="margin:-4px 0 10px">グループの見出しのチェックで、そのグループ全員をまとめて選択・解除できます。各自の「グループ」を選ぶと移動します。</div>
   <div id="members" class="muted">読み込み中...</div>
 </div>
 
@@ -1040,28 +1059,107 @@ document.addEventListener('touchend', () => {
   if (dragging) { dragging = false; renderPreview(); }
 });
 
+let MEMBERS = [];      // {name, quota, group, checked}
+let GROUP_NAMES = [];  // 作成済みのグループ名（並び順どおり）
+let _saveTimer = null;
+
+function esc(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function allGroupNames() {
+  const names = GROUP_NAMES.slice();
+  MEMBERS.forEach(m => { if (m.group && !names.includes(m.group)) names.push(m.group); });
+  return names;
+}
+function saveGroups() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    try {
+      await fetch('/admin/groups.json?token=' + encodeURIComponent(TOKEN), {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          group_names: allGroupNames(),
+          groups: MEMBERS.map(m => m.group || ''),
+          quotas: MEMBERS.map(m => parseInt(m.quota, 10) || 0),
+        }),
+      });
+    } catch (e) {}
+  }, 400);
+}
 function toggleAll(on) {
-  document.querySelectorAll('#members input[type=checkbox]').forEach(cb => cb.checked = on);
+  MEMBERS.forEach(m => m.checked = on);
+  renderMembers();
+}
+function toggleGroup(name, on) {
+  MEMBERS.forEach(m => { if ((m.group || '') === name) m.checked = on; });
+  renderMembers();
+}
+function setChecked(i, on) { MEMBERS[i].checked = on; renderMembers(); }
+function setGroup(i, name) { MEMBERS[i].group = name; renderMembers(); saveGroups(); }
+function setQuota(i, v) { MEMBERS[i].quota = v; saveGroups(); }
+function addGroup() {
+  const box = document.getElementById('newGroup');
+  const name = box.value.replace(/[|]/g, '').trim();
+  if (!name) return;
+  if (!allGroupNames().includes(name)) GROUP_NAMES.push(name);
+  box.value = '';
+  renderMembers(); saveGroups();
+}
+function removeGroup(name) {
+  const n = MEMBERS.filter(m => m.group === name).length;
+  if (n && !confirm('グループ「' + name + '」をなくして、' + n + '人を個人に戻します。よろしいですか？')) return;
+  MEMBERS.forEach(m => { if (m.group === name) m.group = ''; });
+  GROUP_NAMES = GROUP_NAMES.filter(g => g !== name);
+  renderMembers(); saveGroups();
+}
+function memberRow(m, i, names) {
+  const opts = ['<option value="">個人</option>'].concat(names.map(g =>
+    `<option value="${esc(g)}"${m.group === g ? ' selected' : ''}>${esc(g)}</option>`)).join('');
+  return `<div class="member">
+     <label><input type="checkbox"${m.checked ? ' checked' : ''} onchange="setChecked(${i}, this.checked)"> ${i + 1}. ${esc(m.name)}</label>
+     <span class="qwrap">
+       グループ <select class="group" onchange="setGroup(${i}, this.value)">${opts}</select>
+       コマ数 <input class="quota" type="number" min="0" max="9" value="${esc(m.quota)}" oninput="setQuota(${i}, this.value)">
+     </span>
+   </div>`;
+}
+function groupBox(title, key, solo, names, removable) {
+  const rows = [];
+  MEMBERS.forEach((m, i) => { if ((m.group || '') === key) rows.push(memberRow(m, i, names)); });
+  const inGroup = MEMBERS.filter(m => (m.group || '') === key);
+  const on = inGroup.filter(m => m.checked).length;
+  const allOn = inGroup.length > 0 && on === inGroup.length;
+  const keyArg = esc(JSON.stringify(key));
+  return `<div class="gbox${solo ? ' solo' : ''}">
+    <div class="ghead">
+      <label><input type="checkbox" data-partial="${on > 0 && !allOn ? 1 : 0}"${allOn ? ' checked' : ''}${inGroup.length ? '' : ' disabled'}
+        onchange="toggleGroup(${keyArg}, this.checked)"> ${esc(title)}
+        <span class="gcount">${inGroup.length}人${inGroup.length ? '・選択 ' + on : ''}</span></label>
+      ${removable ? `<button class="gdel" onclick="removeGroup(${keyArg})">グループを削除</button>` : ''}
+    </div>
+    ${rows.join('') || '<div class="gempty">まだ誰もいません。下の「個人」から各自のグループを選ぶと入ります。</div>'}
+  </div>`;
+}
+function renderMembers() {
+  const box = document.getElementById('members');
+  if (!MEMBERS.length) {
+    box.className = 'muted';
+    box.innerHTML = 'メンバーがまだ登録されていません。先に友だち追加してもらってください。';
+    return;
+  }
+  const names = allGroupNames();
+  box.className = '';
+  box.innerHTML = names.map(g => groupBox(g, g, false, names, true)).join('')
+    + groupBox('個人', '', true, names, false);
+  box.querySelectorAll('input[data-partial="1"]').forEach(cb => cb.indeterminate = true);
 }
 async function loadMembers() {
   try {
     const res = await fetch('/admin/members.json?token=' + encodeURIComponent(TOKEN));
     const data = await res.json();
-    const box = document.getElementById('members');
-    if (!data.members || !data.members.length) {
-      box.innerHTML = '<span class="muted">メンバーがまだ登録されていません。先に友だち追加してもらってください。</span>';
-      return;
-    }
-    box.className = '';
-    box.innerHTML = data.members.map((m, i) =>
-      `<div class="member">
-         <label><input type="checkbox" value="${i + 1}" checked> ${i + 1}. ${m.name}</label>
-         <span class="qwrap">
-           グループ <input class="group" type="text" placeholder="個人" value="${m.group || ''}">
-           コマ数 <input class="quota" type="number" min="0" max="9" value="${m.quota}">
-         </span>
-       </div>`
-    ).join('');
+    MEMBERS = (data.members || []).map(m => ({name: m.name, quota: m.quota, group: m.group || '', checked: true}));
+    GROUP_NAMES = (data.group_names || []).slice();
+    renderMembers();
   } catch (e) {
     document.getElementById('members').textContent = 'メンバー取得に失敗しました: ' + e;
   }
@@ -1070,7 +1168,7 @@ async function send() {
   const list = candidates();
   const box = document.getElementById('result');
   if (!list.length) { box.className = 'err'; box.textContent = '候補が0件です。グリッドから時間を選んでください。'; return; }
-  const to = Array.from(document.querySelectorAll('#members input[type=checkbox]:checked')).map(cb => cb.value);
+  const to = MEMBERS.map((m, i) => m.checked ? String(i + 1) : null).filter(Boolean);
   if (!to.length) { box.className = 'err'; box.textContent = '送信先が選ばれていません。'; return; }
   if (!confirm(list.length + '件の候補を' + to.length + '人に送信します。よろしいですか？')) return;
 
@@ -1112,9 +1210,9 @@ function goNotify() {
 }
 
 function runAssign() {
-  const qs = Array.from(document.querySelectorAll('#members .quota')).map(i => i.value || '1');
+  const qs = MEMBERS.map(m => (m.quota === '' || m.quota == null) ? '1' : String(m.quota));
   if (!qs.length) { alert('メンバーがまだ登録されていません。'); return; }
-  const gs = Array.from(document.querySelectorAll('#members .group')).map(i => i.value.trim());
+  const gs = MEMBERS.map(m => (m.group || '').trim());
   location.href = '/admin/assign?token=' + encodeURIComponent(TOKEN)
     + '&quotas=' + qs.join(',')
     + '&groups=' + encodeURIComponent(gs.join('|'));
@@ -1260,6 +1358,40 @@ def admin_panel():
     )
 
 
+@app.route("/admin/groups.json", methods=["POST"])
+def admin_groups_save():
+    """管理画面の送信先で作ったグループ・各自のグループ・コマ数を保存する。
+    groups / quotas はメンバー一覧の並び順に対応するリスト。"""
+    check_admin_token()
+    data = request.get_json(silent=True) or {}
+    members = load_json("members")
+    group_list = data.get("groups") or []
+    quota_list = data.get("quotas") or []
+
+    def clean(name):
+        return str(name or "").replace("|", "").strip()[:40]
+
+    groups = load_json("groups", default={})
+    quotas = load_json("quotas", default={})
+    for i, mem in enumerate(members):
+        if i < len(group_list):
+            groups[mem["user_id"]] = clean(group_list[i])
+        if i < len(quota_list):
+            try:
+                quotas[mem["user_id"]] = max(0, min(9, int(quota_list[i])))
+            except (TypeError, ValueError):
+                pass
+    names = []
+    for name in data.get("group_names") or []:
+        name = clean(name)
+        if name and name not in names:
+            names.append(name)
+    save_json("groups", groups)
+    save_json("quotas", quotas)
+    save_json("group_names", names)
+    return {"ok": True, "group_names": names}
+
+
 @app.route("/admin/members.json", methods=["GET"])
 def admin_members_json():
     """管理画面が送信先とコマ数を描画するためのメンバー一覧"""
@@ -1268,6 +1400,7 @@ def admin_members_json():
     quotas = load_json("quotas", default={})
     groups = load_json("groups", default={})
     return {
+        "group_names": load_json("group_names", default=[]),
         "members": [
             {
                 "name": m["display_name"],
