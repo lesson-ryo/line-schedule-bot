@@ -73,8 +73,10 @@ def _with_tenant(name: str, callback):
 
 
 def build_snapshot() -> dict:
+    from tenant_config import TENANT_NAMES
+
     schedules = {}
-    for tenant in ("kansai", "kanto"):
+    for tenant in TENANT_NAMES:
         schedules[tenant] = _with_tenant(
             tenant,
             lambda: {key: load_json(key, default=_default_for(key)) for key in SCHEDULE_KEYS},
@@ -139,6 +141,7 @@ def list_snapshots() -> list[dict]:
                 "created_at": snapshot.get("created_at", ""),
                 "kansai_members": len((schedules.get("kansai") or {}).get("members") or []),
                 "kanto_members": len((schedules.get("kanto") or {}).get("members") or []),
+                "online_members": len((schedules.get("online") or {}).get("members") or []),
                 "carte_progress": len(carte.get("carte:progress") or []),
             }
         )
@@ -162,10 +165,14 @@ def restore_snapshot(index: int) -> dict:
         raise ValueError("バックアップの形式が正しくありません。")
 
     safety = save_snapshot()
+    from tenant_config import BASE_TENANT_NAMES, TENANT_NAMES
+
     schedules = snapshot["schedules"]
-    for tenant in ("kansai", "kanto"):
+    for tenant in TENANT_NAMES:
         data = schedules.get(tenant)
         if not isinstance(data, dict):
+            if tenant not in BASE_TENANT_NAMES:
+                continue  # オンラインを作る前のバックアップには無いので、そのままにする
             raise ValueError(f"{tenant}の日程データが見つかりません。")
 
         def restore_schedule():

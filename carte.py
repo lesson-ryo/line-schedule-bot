@@ -493,7 +493,9 @@ def _student_home(user_id, materials, progress):
 
     now = datetime.now(JST)
     lessons = []
-    for tenant in ("kansai", "kanto"):
+    from tenant_config import TENANT_NAMES
+
+    for tenant in TENANT_NAMES:
         with tenant_scope(tenant):
             assignment = load_json("assignment", default=[])
         for slot in assignment if isinstance(assignment, list) else []:
@@ -1213,3 +1215,17 @@ def create_carte_blueprint(
         return {"ok": True, "count": len(load_materials(force=True))}
 
     return bp
+
+
+# オンライン用が有効なときだけ、上のメニューに「オンラインの日程」を足す。
+def _add_online_nav():
+    from tenant_config import TENANT_NAMES
+
+    if "online" not in TENANT_NAMES:
+        return
+    for _key, _value in list(globals().items()):
+        if _key.isupper() and isinstance(_value, str) and "['/kanto/admin/panel','関東の日程']," in _value:
+            globals()[_key] = _value.replace("['/kanto/admin/panel','関東の日程'],", "['/kanto/admin/panel','関東の日程'],['/online/admin/panel','オンラインの日程'],")
+
+
+_add_online_nav()

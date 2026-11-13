@@ -1473,7 +1473,14 @@ def admin_assign():
     candidates = load_json("candidates", default=[])
     votes = load_json("votes")
     locations = {l["user_id"]: l["location"] for l in load_json("locations")}
-    result = assign_mod.auto_assign(candidates, votes, quotas, locations, groups)
+    from lesson_operations import other_tenant_busy
+
+    day_labels = list(dict.fromkeys(assign_mod.split_slot(c)[0] for c in candidates))
+    busy = other_tenant_busy(get_tenant().name, day_labels)
+    result = assign_mod.auto_assign(
+        candidates, votes, quotas, locations, groups,
+        busy=busy, all_online=get_tenant().name == "online",
+    )
 
     # 同じ講師が関西・関東で同時刻に入らないよう、地域をまたいで検算する。
     from lesson_operations import cross_tenant_conflicts

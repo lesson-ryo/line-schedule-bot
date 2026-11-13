@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from flask import g, has_request_context
 
 
-TENANT_NAMES = ("kansai", "kanto")
+# オンライン用は、LINEの鍵（ONLINE_CHANNEL_ACCESS_TOKEN）をRenderに登録したときだけ有効にする。
+BASE_TENANT_NAMES = ("kansai", "kanto")
+TENANT_NAMES = BASE_TENANT_NAMES + (
+    ("online",) if os.environ.get("ONLINE_CHANNEL_ACCESS_TOKEN", "").strip() else ()
+)
+DEFAULT_PANEL_NAMES = {"kansai": "Lesson Kansai", "kanto": "Lesson Kanto", "online": "Lesson オンライン"}
 _TENANT_OVERRIDE = ContextVar("lesson_tenant_override", default=None)
 DEFAULT_TENANT = os.environ.get("DEFAULT_TENANT") or (
     "kanto" if os.environ.get("STORAGE_PREFIX", "").startswith("kanto:") else "kansai"
@@ -71,7 +76,8 @@ def _build(tenant: str) -> TenantConfig:
         admin_token=_env(tenant, "ADMIN_TOKEN", legacy_name("ADMIN_TOKEN")),
         liff_id=liff_id,
         line_channel_id=_env(tenant, "LINE_CHANNEL_ID", legacy_name("LINE_CHANNEL_ID")),
-        panel_name=_env(tenant, "PANEL_NAME", legacy_name("PANEL_NAME")) or f"Lesson {tenant.title()}",
+        panel_name=_env(tenant, "PANEL_NAME", legacy_name("PANEL_NAME"))
+        or DEFAULT_PANEL_NAMES.get(tenant, f"Lesson {tenant.title()}"),
         locations=locations,
         auto_reply=_env(tenant, "AUTO_REPLY", legacy_name("AUTO_REPLY")).strip() or DEFAULT_AUTO_REPLY,
         carte_liff_id=carte_liff_id,

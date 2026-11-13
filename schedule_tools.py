@@ -223,7 +223,9 @@ def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
         lines = [intro, "", f"■ {when}"]
 
         location = slot.get("location", "")
-        if location:
+        if location == "オンライン":
+            lines.append("　場所: オンライン")
+        elif location:
             lines.append(f"　教室: {location}")
 
         if slot.get("is_group"):

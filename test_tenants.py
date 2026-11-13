@@ -893,3 +893,99 @@ def test_member_can_join_multiple_groups(client):
     assert entities["B班"]["member_ids"] == ["U1"]
     assert entities["U3"]["bookings"] == 2
     assert "U1" not in entities
+
+
+def _assign_result(votes_by_user, locations=None, busy=None, all_online=False, quotas=None, groups=None):
+    import assign
+
+    cands = [f"11/22(土) {h}:00" for h in range(10, 19)]
+    votes = []
+    for user, hours in votes_by_user.items():
+        for h in hours:
+            votes.append({"user_id": user, "display_name": user, "candidate_index": h - 9})
+    return assign.auto_assign(cands, votes, quotas or {}, locations or {}, groups or {},
+                              busy=busy, all_online=all_online)
+
+
+def test_online_lessons_are_kept_away_from_classroom_time():
+    result = _assign_result(
+        {"A": range(10, 19), "B": range(10, 19), "C": range(10, 19)},
+        locations={"A": "吹田教室", "B": "吹田教室", "C": "オンライン"},
+    )
+    rows = {r["name"]: r for r in result["schedule"]}
+    assert rows["C"]["location"] == "オンライン"
+    a_end = max(int(rows[n]["end"].split(":")[0]) for n in ("A", "B"))
+    a_start = min(int(rows[n]["time"].split(":")[0]) for n in ("A", "B"))
+    c_start = int(rows["C"]["time"].split(":")[0])
+    c_end = int(rows["C"]["end"].split(":")[0])
+    assert c_start >= a_end + 1 or c_end <= a_start - 1
+
+
+def test_online_location_does_not_count_as_second_classroom():
+    result = _assign_result(
+        {"A": [10], "B": [11], "C": [14]},
+        locations={"A": "吹田教室", "B": "吹田教室", "C": "オンライン"},
+    )
+    assert result["assigned"] == 3
+    times = sorted((r["time"], r["name"]) for r in result["schedule"])
+    assert times == [("10:00", "A"), ("11:00", "B"), ("14:00", "C")]
+
+
+def test_online_tenant_avoids_other_regions_classroom_lessons():
+    # 関西で 11:00-13:00 に対面 → オンラインは 10:00 も 13:00 も不可、14:00 以降なら可
+    busy = {"11/22(土)": [(22, 26, False)]}
+    result = _assign_result({"X": [10, 13, 14]}, busy=busy, all_online=True)
+    assert [r["time"] for r in result["schedule"]] == ["14:00"]
+
+
+def test_classroom_lessons_avoid_other_regions_online_lessons():
+    busy = {"11/22(土)": [(28, 30, True)]}  # オンライン 14:00-15:00
+    result = _assign_result({"A": [13, 15, 16]}, locations={"A": "吹田教室"}, busy=busy)
+    assert [r["time"] for r in result["schedule"]] == ["16:00"]
+
+
+def test_online_notification_says_place_online(client):
+    _, storage, _ = client
+    from lesson_operations import tenant_scope
+    from schedule_tools import build_notifications
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [{"user_id": "U1", "display_name": "生徒A"}])
+        items = build_notifications([
+            {"day": "11/22(土)", "time": "14:00", "end": "15:00", "name": "生徒A",
+             "member_ids": ["U1"], "is_group": False, "location": "オンライン"},
+        ])
+    assert "場所: オンライン" in items[0]["text"]
+    assert "教室:" not in items[0]["text"]
+
+
+def test_online_tenant_is_off_until_configured(client):
+    import tenant_config
+    assert "online" not in tenant_config.TENANT_NAMES
+
+
+def test_online_tenant_routes_when_configured(monkeypatch, client):
+    http, storage, tmp_path = client
+    monkeypatch.setenv("ONLINE_CHANNEL_ACCESS_TOKEN", "online-token")
+    monkeypatch.setenv("ONLINE_CHANNEL_SECRET", "online-secret")
+    monkeypatch.setenv("ONLINE_LIFF_ID", "online-liff")
+    import importlib
+    import tenant_config, storage as st, lesson_operations, maintenance, carte, admin_portal, app
+
+    for mod in (tenant_config, st, lesson_operations, maintenance, carte, admin_portal, app):
+        importlib.reload(mod)
+    monkeypatch.setattr(st, "BASE_DIR", tmp_path)
+    try:
+        assert "online" in tenant_config.TENANT_NAMES
+        assert lesson_operations.TENANT_LABELS["online"] == "オンライン"
+        assert tenant_config.TENANTS["online"].storage_prefix == "online:"
+        assert tenant_config.TENANTS["online"].panel_name == "Lesson オンライン"
+        web = app.app.test_client()
+        assert web.get("/online/liff").status_code == 200
+        assert "オンラインの日程" in admin_portal.HOME_HTML
+        snap = maintenance.build_snapshot()
+        assert "online" in snap["schedules"]
+    finally:
+        monkeypatch.delenv("ONLINE_CHANNEL_ACCESS_TOKEN")
+        for mod in (tenant_config, st, lesson_operations, maintenance, carte, admin_portal, app):
+            importlib.reload(mod)

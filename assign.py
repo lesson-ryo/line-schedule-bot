@@ -10,6 +10,11 @@
 - グループは「参加できる人数が最も多い時間帯」に入れる（全員でなくてもよい）
 - 使う日数をできるだけ少なくし、同じ日の中では連続した時間になるようにする
 - 教室が複数ある場合、同じ日に別の教室へ移る際は1時間以上空ける（移動時間）
+- オンラインは自宅で行う扱い。教室の対面レッスンとは1時間以上空け、
+  教室にいる時間（その日の最初の対面〜最後の対面）の途中には入れない。
+  対面を先に組み、オンラインは残った時間に入れる
+- 他の地域（関西・関東・オンライン）ですでに決まっている予定とも重ねず、
+  対面とオンラインの間は同じく1時間空ける
 
 回答フォームは1時間刻みのままで、30分単位になるのは割り当ての段階だけ。
 「10:00 と 11:00 に○」＝「10:00〜12:00 は空いている」とみなして
@@ -23,6 +28,12 @@ TRAVEL_GAP = 2
 
 # この教室を選んだ人は、どの教室の時間帯にも入れられる
 ANY_LOCATION = "どちらでもOK"
+
+# オンラインを選んだ人（自宅で行うレッスン）
+ONLINE = "オンライン"
+
+# 対面とオンラインの間に空ける時間（30分単位。2 = 1時間）
+ONLINE_GAP_UNITS = 2
 
 # 時間の最小単位（1時間 = 2コマ = 30分×2）
 UNITS_PER_HOUR = 2
@@ -183,13 +194,15 @@ def _starts_for(entity, length, hour_to_slot, free_units, allowed_hours):
     return starts
 
 
-def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a):
+def _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a, blocked=None):
     """1日分を埋める。入れられる場所が少ない組から順に、早い時間へ詰めていく。
+    blocked: この日に使えない時間（30分単位の番号の集合）
     戻り値: [(組ID, 開始unit, 長さ), ...]"""
     free_units = set()
     for h in hour_to_slot:
         for k in range(UNITS_PER_HOUR):
             free_units.add(h * UNITS_PER_HOUR + k)
+    free_units -= set(blocked or ())
 
     placed = []
     remaining = list(pending)
@@ -250,8 +263,14 @@ def _day_plans(hours: list[int]):
     return plans
 
 
-def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a):
+def _near(start, end, gap):
+    """start〜end（30分単位）の前後 gap 分も含めた番号の集合"""
+    return set(range(start - gap, end + gap))
+
+
+def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a, busy=None):
     """指定した長さで全日程の割り当てを試す。
+    busy: 日付 → [(開始unit, 終了unit, オンラインか), ...]（他の地域ですでに決まっている予定）
     戻り値: (日付 → [(組ID, 開始unit, 長さ)], 残った予約数)"""
     pending = []
     for eid, e in entities.items():
@@ -265,28 +284,58 @@ def _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a):
         hour_to_slot = slots_by_day[day]
         hours = sorted(hour_to_slot.keys())
         plans = _day_plans(hours) if multi_loc else [(set(hours), set(hours))]
+        others = (busy or {}).get(day, [])
+
+        # 1) 対面を先に組む（他地域の予定と重ねない・他地域のオンラインとは1時間空ける）
+        offline_pending = [eid for eid in pending if not entities[eid].get("online")]
+        blocked_offline = set()
+        for start, end, online in others:
+            blocked_offline |= _near(start, end, ONLINE_GAP_UNITS) if online else set(range(start, end))
 
         best = None
-        for hours_a, hours_b in plans:
-            placed = _fill_day(pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a)
-            if not placed:
-                continue
-            used = [u for _, u, _, _ in placed]
-            attend = sum(
-                entities[eid]["attend"][hour_to_slot[h]]
-                for eid, u, ln, _ in placed
-                for h in _covered_hours(u, ln)
-            )
-            score = (-len(placed), -attend, max(used) - min(used), min(used))
-            if best is None or score < best[0]:
-                best = (score, placed)
+        if offline_pending:
+            for hours_a, hours_b in plans:
+                placed = _fill_day(
+                    offline_pending, entities, lengths, hour_to_slot, hours_a, hours_b, loc_a, blocked_offline
+                )
+                if not placed:
+                    continue
+                used = [u for _, u, _, _ in placed]
+                attend = sum(
+                    entities[eid]["attend"][hour_to_slot[h]]
+                    for eid, u, ln, _ in placed
+                    for h in _covered_hours(u, ln)
+                )
+                score = (-len(placed), -attend, max(used) - min(used), min(used))
+                if best is None or score < best[0]:
+                    best = (score, placed)
 
-        if best is None:
-            continue
-
-        result[day] = best[1]
-        for eid, _, _, _ in best[1]:
+        day_placed = list(best[1]) if best else []
+        for eid, _, _, _ in day_placed:
             pending.remove(eid)
+
+        # 2) オンラインは残った時間に入れる。教室にいる時間帯（最初〜最後の対面）と
+        #    その前後1時間、他地域の予定（対面なら前後1時間も）には入れない。
+        online_pending = [eid for eid in pending if entities[eid].get("online")]
+        if online_pending:
+            blocked_online = set()
+            inperson = [(u, u + ln) for _, u, ln, _ in day_placed]
+            inperson += [(start, end) for start, end, online in others if not online]
+            if inperson:
+                blocked_online |= _near(min(a for a, _ in inperson), max(b for _, b in inperson), ONLINE_GAP_UNITS)
+            for start, end, online in others:
+                if online:
+                    blocked_online |= set(range(start, end))
+            all_hours = set(hours)
+            placed_online = _fill_day(
+                online_pending, entities, lengths, hour_to_slot, all_hours, all_hours, loc_a, blocked_online
+            )
+            for eid, _, _, _ in placed_online:
+                pending.remove(eid)
+            day_placed += placed_online
+
+        if day_placed:
+            result[day] = day_placed
 
     return result, len(pending)
 
@@ -297,10 +346,16 @@ def auto_assign(
     quotas: dict,
     locations: dict | None = None,
     groups: dict | None = None,
+    busy: dict | None = None,
+    all_online: bool = False,
 ) -> dict:
-    """割り当てを実行して結果を返す。"""
+    """割り当てを実行して結果を返す。
+    busy: 他の地域ですでに決まっている予定（日付 → [(開始unit, 終了unit, オンラインか)]）
+    all_online: オンライン用アカウントの割り当て（全員オンライン扱い）"""
     avail, names = build_availability(candidates, votes)
     entities = build_entities(avail, names, quotas, locations, groups)
+    for e in entities.values():
+        e["online"] = all_online or e["location"] == ONLINE
 
     if not entities:
         return {"ok": False, "error": "割り当て対象がいません。先に回答を集めてください。"}
@@ -320,7 +375,7 @@ def auto_assign(
     loc_names = []
     for e in entities.values():
         loc = e["location"]
-        if loc and loc != ANY_LOCATION and loc not in loc_names:
+        if loc and loc not in (ANY_LOCATION, ONLINE) and loc not in loc_names:
             loc_names.append(loc)
     loc_a = loc_names[0] if loc_names else ""
     multi_loc = len(loc_names) >= 2
@@ -332,7 +387,7 @@ def auto_assign(
         eid: (GROUP_UNITS if e["is_group"] else INDIVIDUAL_UNITS)
         for eid, e in entities.items()
     }
-    placement, left = _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a)
+    placement, left = _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a, busy)
     shortened: set = set()
 
     def try_with(short_set):
@@ -344,7 +399,7 @@ def auto_assign(
             )
             for eid, e in entities.items()
         }
-        return _run(entities, trial, candidates, days, slots_by_day, multi_loc, loc_a)
+        return _run(entities, trial, candidates, days, slots_by_day, multi_loc, loc_a, busy)
 
     # 収まらなければ、グループを順に1.5時間へ短縮していく
     # （1組だけでは足りず、複数まとめて短縮して初めて収まる場合があるため累積で試す）

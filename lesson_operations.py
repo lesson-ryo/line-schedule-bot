@@ -18,7 +18,7 @@ from tenant_config import TENANTS, TENANT_NAMES, reset_tenant_override, set_tena
 
 
 JST = ZoneInfo("Asia/Tokyo")
-TENANT_LABELS = {"kansai": "関西", "kanto": "関東"}
+TENANT_LABELS = {k: v for k, v in {"kansai": "関西", "kanto": "関東", "online": "オンライン"}.items() if k in TENANT_NAMES}
 
 
 @contextmanager
@@ -274,6 +274,35 @@ def cross_tenant_conflicts(current_tenant: str, proposed: list[dict]) -> list[st
                         f"（{theirs.get('name', '予定あり')}）と重なります。"
                     )
     return conflicts
+
+
+def other_tenant_busy(current_tenant: str, day_labels: list[str]) -> dict:
+    """自動割り当て用に、他の地域ですでに決まっている予定を日付ごとにまとめる。
+    戻り値: 日付ラベル → [(開始, 終了, オンラインか)]（時刻は30分単位の番号）"""
+    today = datetime.now(JST).date()
+    wanted = {}
+    for label in day_labels:
+        day = parse_schedule_date(label, today=today)
+        if day:
+            wanted.setdefault(day, []).append(label)
+    busy: dict[str, list] = {}
+    for other in TENANT_NAMES:
+        if other == current_tenant:
+            continue
+        with tenant_scope(other):
+            existing = _as_list(load_json("assignment", default=[]))
+        for slot in existing:
+            interval = _slot_interval(slot, today=today)
+            if not interval or interval[0].date() not in wanted:
+                continue
+            start = interval[0].hour * 2 + (1 if interval[0].minute >= 30 else 0)
+            end = interval[1].hour * 2 + (1 if interval[1].minute > 0 else 0)
+            if interval[1].minute > 30:
+                end += 1
+            online = other == "online" or str(slot.get("location", "")).strip() == "オンライン"
+            for label in wanted[interval[0].date()]:
+                busy.setdefault(label, []).append((start, end, online))
+    return busy
 
 
 def _lesson_identity(tenant: str, slot: dict, occurrence: int = 1) -> str:
@@ -663,7 +692,9 @@ def reminder_preview(tenant: str, kind: str, today: date | None = None) -> dict:
             continue
         when = f"{slot.get('day', '')} {slot.get('time', '')}〜{slot.get('end', '')}".strip()
         text = f"明日のレッスン確認です。\n\n■ {when}"
-        if slot.get("location"):
+        if slot.get("location") == "オンライン":
+            text += "\n場所: オンライン"
+        elif slot.get("location"):
             text += f"\n教室: {slot.get('location')}"
         text += "\n\nよろしくお願いします。"
         for user_id in slot.get("member_ids", []):
