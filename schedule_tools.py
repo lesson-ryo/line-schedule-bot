@@ -227,7 +227,8 @@ def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
             lines.append(f"　教室: {location}")
 
         if slot.get("is_group"):
-            lines.append(f"　レッスン: {slot.get('name', '')}（グループ）")
+            # グループ名は講師用のメモ。生徒さんには名前を出さない。
+            lines.append("　レッスン: グループレッスン")
             absent = [members.get(u, u) for u in slot.get("absent", []) if u]
             if absent:
                 lines.append(f"　※ この時間に参加できない方: {', '.join(absent)}")

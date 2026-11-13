@@ -828,3 +828,18 @@ def test_groups_are_saved_from_member_panel(client):
     assert data["group_names"] == ["火曜A班", "空の班"]
     assert [m["group"] for m in data["members"]] == ["火曜A班", ""]
     assert [m["quota"] for m in data["members"]] == [2, 1]
+
+
+def test_group_name_is_not_shown_to_students(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+    from schedule_tools import build_notifications
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [{"user_id": "U1", "display_name": "生徒A"}])
+        items = build_notifications([
+            {"day": "11/22(土)", "time": "13:00", "end": "15:00", "name": "山田さん佐藤さん組",
+             "member_ids": ["U1"], "is_group": True, "location": ""},
+        ])
+    assert "グループレッスン" in items[0]["text"]
+    assert "山田さん佐藤さん組" not in items[0]["text"]
