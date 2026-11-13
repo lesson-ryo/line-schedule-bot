@@ -843,3 +843,24 @@ def test_group_name_is_not_shown_to_students(client):
         ])
     assert "グループレッスン" in items[0]["text"]
     assert "山田さん佐藤さん組" not in items[0]["text"]
+
+
+def test_group_notification_lists_participants(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+    from schedule_tools import build_notifications
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "山田"},
+            {"user_id": "U2", "display_name": "佐藤"},
+            {"user_id": "U3", "display_name": "高橋"},
+        ])
+        items = build_notifications([
+            {"day": "11/22(土)", "time": "13:00", "end": "15:00", "name": "土曜組",
+             "member_ids": ["U1", "U2", "U3"], "absent": ["U3"], "is_group": True, "location": ""},
+        ])
+    text = items[0]["text"]
+    assert "参加メンバー: 山田さん・佐藤さん" in text
+    assert "高橋さん" not in text.split("参加メンバー:")[1].split("\n")[0]
+    assert "この時間に参加できない方: 高橋" in text
