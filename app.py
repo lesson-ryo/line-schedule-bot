@@ -760,6 +760,10 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   .gbox .gother { display: block; margin-left: 24px; font-size: 11px; color: #06783b; }
   .gbox .gout { background: none; border: 1px solid #ddd; border-radius: 6px; color: #888; font-size: 12px; padding: 4px 10px; margin-left: auto; cursor: pointer; }
   .gadd { padding: 6px 10px 8px; }
+  .sendsum { margin: 0 0 10px; padding: 8px 10px; background: #f6fbf8; border-radius: 8px; font-size: 14px; }
+  .sendsum b { color: #06783b; font-size: 16px; }
+  .sendsum span { display: block; font-size: 11px; color: #888; margin-top: 2px; }
+  .gbox .member:has(input[type=checkbox]:not(:checked)) label { color: #aaa; }
   .gadd select { width: 100%; padding: 7px; border: 1px dashed #b6e2c6; border-radius: 8px; font-size: 13px; color: #06783b; background: #fff; }
   .links a { font-size: 13px; margin-right: 14px; }
 </style>
@@ -1085,6 +1089,7 @@ function saveGroups() {
           group_names: allGroupNames(),
           groups: MEMBERS.map(m => m.groups),
           quotas: MEMBERS.map(m => parseInt(m.quota, 10) || 0),
+          send: MEMBERS.map(m => !!m.checked),
         }),
       });
     } catch (e) {}
@@ -1092,14 +1097,14 @@ function saveGroups() {
 }
 function toggleAll(on) {
   MEMBERS.forEach(m => m.checked = on);
-  renderMembers();
+  renderMembers(); saveGroups();
 }
 function inBox(m, key) { return key === '' ? !m.groups.length : m.groups.includes(key); }
 function toggleGroup(name, on) {
   MEMBERS.forEach(m => { if (inBox(m, name)) m.checked = on; });
-  renderMembers();
+  renderMembers(); saveGroups();
 }
-function setChecked(i, on) { MEMBERS[i].checked = on; renderMembers(); }
+function setChecked(i, on) { MEMBERS[i].checked = on; renderMembers(); saveGroups(); }
 function joinGroup(name, i) {
   if (i === '' || i == null) return;
   const m = MEMBERS[+i];
@@ -1168,8 +1173,10 @@ function renderMembers() {
     return;
   }
   const names = allGroupNames();
+  const on = MEMBERS.filter(m => m.checked).length;
   box.className = '';
-  box.innerHTML = names.map(g => groupBox(g, g, false)).join('')
+  box.innerHTML = `<div class="sendsum">送信する人: <b>${on}</b>人 / 全${MEMBERS.length}人<span>チェックの状態は自動で保存され、次回もそのまま残ります。新しく友だち追加した人は最初はチェックが入ります。</span></div>`
+    + names.map(g => groupBox(g, g, false)).join('')
     + groupBox('個人（グループなし）', '', true);
   box.querySelectorAll('input[data-partial="1"]').forEach(cb => cb.indeterminate = true);
 }
@@ -1178,7 +1185,7 @@ async function loadMembers() {
     const res = await fetch('/admin/members.json?token=' + encodeURIComponent(TOKEN));
     const data = await res.json();
     MEMBERS = (data.members || []).map(m => ({name: m.name, quota: m.quota,
-      groups: (m.groups || (m.group ? [m.group] : [])).slice(), checked: true}));
+      groups: (m.groups || (m.group ? [m.group] : [])).slice(), checked: m.send !== false}));
     GROUP_NAMES = (data.group_names || []).slice();
     renderMembers();
   } catch (e) {
@@ -1388,6 +1395,7 @@ def admin_groups_save():
     members = load_json("members")
     group_list = data.get("groups") or []
     quota_list = data.get("quotas") or []
+    send_list = data.get("send")
 
     def clean(name):
         return str(name or "").replace("|", "").replace(",", "").strip()[:40]
@@ -1416,6 +1424,13 @@ def admin_groups_save():
         name = clean(name)
         if name and name not in names:
             names.append(name)
+    if isinstance(send_list, list):
+        # チェックを外した人（送らない人）だけを覚える。新しい友だちは自動で「送る」になる。
+        send_off = [
+            mem["user_id"] for i, mem in enumerate(members)
+            if i < len(send_list) and send_list[i] is False
+        ]
+        save_json("send_off", send_off)
     save_json("groups", groups)
     save_json("quotas", quotas)
     save_json("group_names", names)
@@ -1434,6 +1449,7 @@ def admin_members_json():
     members = load_json("members")
     quotas = load_json("quotas", default={})
     groups = load_json("groups", default={})
+    send_off = set(load_json("send_off", default=[]) or [])
     return {
         "group_names": load_json("group_names", default=[]),
         "members": [
@@ -1441,6 +1457,7 @@ def admin_members_json():
                 "name": m["display_name"],
                 "quota": int(quotas.get(m["user_id"], 1)),
                 "groups": assign_group_list(groups.get(m["user_id"], "")),
+                "send": m["user_id"] not in send_off,
             }
             for m in members
         ]

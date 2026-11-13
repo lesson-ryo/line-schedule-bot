@@ -989,3 +989,35 @@ def test_online_tenant_routes_when_configured(monkeypatch, client):
         monkeypatch.delenv("ONLINE_CHANNEL_ACCESS_TOKEN")
         for mod in (tenant_config, st, lesson_operations, maintenance, carte, admin_portal, app):
             importlib.reload(mod)
+
+
+def test_send_targets_are_remembered(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "A"},
+            {"user_id": "U2", "display_name": "B"},
+        ])
+    r = http.post("/kansai/admin/groups.json?token=kansai-admin",
+                  json={"group_names": [], "groups": [[], []], "quotas": [1, 1], "send": [True, False]})
+    assert r.status_code == 200
+    data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
+    assert [m["send"] for m in data["members"]] == [True, False]
+
+    # 新しく友だち追加した人は「送る」から始まる
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "A"},
+            {"user_id": "U2", "display_name": "B"},
+            {"user_id": "U3", "display_name": "C"},
+        ])
+    data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
+    assert [m["send"] for m in data["members"]] == [True, False, True]
+
+    # sendを送らない古い画面からの保存では、覚えている状態を消さない
+    http.post("/kansai/admin/groups.json?token=kansai-admin",
+              json={"group_names": [], "groups": [[], [], []], "quotas": [1, 1, 1]})
+    data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
+    assert [m["send"] for m in data["members"]] == [True, False, True]

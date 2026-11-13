@@ -18,6 +18,8 @@ SCHEDULE_KEYS = (
     "comments",
     "quotas",
     "groups",
+    "group_names",
+    "send_off",
     "assignment",
     "reset_backup",
     "deadline",
