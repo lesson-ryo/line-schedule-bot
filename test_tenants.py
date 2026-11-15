@@ -1021,3 +1021,63 @@ def test_send_targets_are_remembered(client):
               json={"group_names": [], "groups": [[], [], []], "quotas": [1, 1, 1]})
     data = http.get("/kansai/admin/members.json?token=kansai-admin").get_json()
     assert [m["send"] for m in data["members"]] == [True, False, True]
+
+
+def test_teacher_gets_deadline_notice_next_morning(client):
+    _, storage, _ = client
+    from datetime import datetime
+    import lesson_operations as lo
+    from lesson_operations import tenant_scope, run_due_automations, JST
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "TEACHER", "display_name": "野口亮"},
+            {"user_id": "U1", "display_name": "山田"},
+            {"user_id": "U2", "display_name": "佐藤"},
+        ])
+        storage.save_json("votes", [{"user_id": "U1", "display_name": "山田", "candidate_index": 1}])
+        storage.save_json("candidates", ["11/22(土) 10:00"])
+        storage.save_json("deadline", "2026-11-18 23:59")
+        storage.save_json("automation_settings", {"unanswered_enabled": False, "tomorrow_enabled": False})
+    with tenant_scope("kanto"):
+        storage.save_json("automation_settings", {"unanswered_enabled": False, "tomorrow_enabled": False})
+
+    sent = []
+    push = lambda uid, text: sent.append((uid, text))
+
+    run_due_automations(push, now=datetime(2026, 11, 19, 9, 50, tzinfo=JST))
+    assert sent == []  # まだ10時前
+
+    run_due_automations(push, now=datetime(2026, 11, 19, 10, 5, tzinfo=JST))
+    assert len(sent) == 1
+    uid, text = sent[0]
+    assert uid == "TEACHER"
+    assert "【関西】日程調整の回答期限が過ぎました" in text
+    assert "回答 1/3人" in text
+    assert "佐藤さん" in text and "山田さん" not in text
+    assert "/kansai/admin/panel" in text
+
+    run_due_automations(push, now=datetime(2026, 11, 19, 11, 0, tzinfo=JST))
+    assert len(sent) == 1  # 二重に送らない
+
+    # 古い期限は後から送らない
+    with tenant_scope("kansai"):
+        storage.save_json("deadline", "2026-11-01 23:59")
+    run_due_automations(push, now=datetime(2026, 11, 19, 11, 0, tzinfo=JST))
+    assert len(sent) == 1
+
+
+def test_teacher_notice_can_be_turned_off(client):
+    _, storage, _ = client
+    from datetime import datetime
+    from lesson_operations import tenant_scope, run_due_automations, save_teacher_notify, JST
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [{"user_id": "TEACHER", "display_name": "野口亮"}])
+        storage.save_json("candidates", ["11/22(土) 10:00"])
+        storage.save_json("deadline", "2026-11-18 23:59")
+        storage.save_json("automation_settings", {"unanswered_enabled": False, "tomorrow_enabled": False})
+    save_teacher_notify({"enabled": "", "time": "10:00", "user_id": ""})
+    sent = []
+    run_due_automations(lambda u, t: sent.append(u), now=datetime(2026, 11, 19, 10, 5, tzinfo=JST))
+    assert sent == []

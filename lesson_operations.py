@@ -902,7 +902,7 @@ def automation_status(tenant: str) -> dict:
     with tenant_scope(tenant):
         runs = _as_dict(load_json("automation_runs", default={}))
     recent = sorted(
-        [value for value in runs.values() if isinstance(value, dict)],
+        [value for value in runs.values() if isinstance(value, dict) and value.get("kind") != "teacher"],
         key=lambda row: str(row.get("completed_at") or row.get("started_at") or ""),
         reverse=True,
     )
@@ -979,6 +979,117 @@ def _run_automation_cycle(tenant: str, kind: str, cycle: str, push_text, now: da
     return {"kind": kind, "count": count, "error": ""}
 
 
+TEACHER_NAME_FALLBACK = "野口亮"
+
+
+def teacher_notify_settings() -> dict:
+    """講師（亮さん）への「回答期限が過ぎました」通知の設定。全地域共通。"""
+    defaults = {"enabled": True, "time": "10:00", "user_id": ""}
+    with tenant_scope("kanto"):
+        saved = _as_dict(load_json("teacher_notify", default={}))
+    return {**defaults, **saved}
+
+
+def teacher_candidates() -> list[dict]:
+    """通知先として選べる人（各Botの友だち）。user_id はプロバイダー共通なので地域をまたいで同じ。"""
+    found: dict[str, dict] = {}
+    for tenant in TENANT_NAMES:
+        with tenant_scope(tenant):
+            members = _as_list(load_json("members", default=[]))
+        for m in members:
+            user_id = str(m.get("user_id") or "")
+            if not user_id:
+                continue
+            row = found.setdefault(user_id, {"user_id": user_id, "name": m.get("display_name", ""), "labels": []})
+            row["labels"].append(TENANT_LABELS[tenant])
+    return sorted(found.values(), key=lambda r: r["name"])
+
+
+def teacher_user_id() -> str:
+    settings = teacher_notify_settings()
+    if settings.get("user_id"):
+        return str(settings["user_id"])
+    for row in teacher_candidates():
+        if str(row.get("name") or "").replace(" ", "").replace("　", "") == TEACHER_NAME_FALLBACK:
+            return row["user_id"]
+    return ""
+
+
+def save_teacher_notify(values: dict) -> dict:
+    settings = teacher_notify_settings()
+    value = str(values.get("time") or settings["time"]).strip()
+    if not _clock(value):
+        raise ValueError("通知時刻が正しくありません。")
+    settings["time"] = value
+    settings["enabled"] = bool(values.get("enabled"))
+    settings["user_id"] = str(values.get("user_id") or "").strip()
+    with tenant_scope("kanto"):
+        save_json("teacher_notify", settings)
+    return settings
+
+
+def teacher_deadline_message(tenant: str) -> str:
+    with tenant_scope(tenant):
+        members = _as_list(load_json("members", default=[]))
+        votes = _as_list(load_json("votes", default=[]))
+        skips = _as_list(load_json("skips", default=[]))
+        targets = _as_list(load_json("schedule_targets", default=[]))
+    if targets:
+        wanted = {str(v) for v in targets}
+        members = [m for m in members if str(m.get("user_id") or "") in wanted]
+    responded = {str(row.get("user_id") or "") for row in votes}
+    responded.update(str(v) for v in skips)
+    missing = [m.get("display_name", "") or "名前未登録" for m in members
+               if str(m.get("user_id") or "") not in responded]
+    base = os.environ.get("RENDER_EXTERNAL_URL", "https://line-schedule-bot-jdg6.onrender.com").rstrip("/")
+    lines = [
+        f"【{TENANT_LABELS[tenant]}】日程調整の回答期限が過ぎました",
+        f"回答 {len(members) - len(missing)}/{len(members)}人",
+    ]
+    if missing:
+        lines.append("未回答: " + "、".join(f"{name}さん" for name in missing))
+    lines += ["", "▼ 集計・割り当てはこちら", f"{base}/{tenant}/admin/panel"]
+    return "\n".join(lines)
+
+
+def _run_teacher_notifications(push_text, now: datetime) -> list[dict]:
+    settings = teacher_notify_settings()
+    clock = _clock(settings.get("time", "10:00"))
+    user_id = teacher_user_id()
+    if not settings.get("enabled") or not clock or not user_id:
+        return []
+    results = []
+    for tenant in TENANT_NAMES:
+        if not TENANTS[tenant].schedule_enabled:
+            continue
+        with tenant_scope(tenant):
+            deadline_text = str(load_json("deadline", default="") or "")
+            candidates = _as_list(load_json("candidates", default=[]))
+            runs = _as_dict(load_json("automation_runs", default={}))
+        deadline = _parse_deadline(deadline_text, now.date())
+        if not deadline or not candidates:
+            continue
+        due_at = datetime.combine(deadline.date() + timedelta(days=1), clock, JST)
+        # 期限の翌日の指定時刻から3日以内だけ送る（古い期限を後から送らない）
+        if not (due_at <= now < due_at + timedelta(days=3)):
+            continue
+        key = "teacher:" + hashlib.sha256(deadline_text.encode("utf-8")).hexdigest()[:16]
+        if _as_dict(runs.get(key)).get("completed_at"):
+            continue
+        state = {"kind": "teacher", "started_at": now.isoformat(), "last_error": ""}
+        try:
+            with tenant_scope(tenant):
+                push_text(user_id, teacher_deadline_message(tenant))
+            state.update(completed_at=now.isoformat(), started_at="", count=1)
+        except Exception as exc:
+            state.update(started_at="", last_error=str(exc)[:180])
+        runs[key] = state
+        with tenant_scope(tenant):
+            save_json("automation_runs", dict(list(runs.items())[-200:]))
+        results.append({"kind": "teacher", "tenant": tenant, "error": state["last_error"]})
+    return results
+
+
 def run_due_automations(push_text, now: datetime | None = None) -> list[dict]:
     """Run due LINE reminders. Safe to call repeatedly from the health check."""
     now = now or datetime.now(JST)
@@ -1003,4 +1114,8 @@ def run_due_automations(push_text, now: datetime | None = None) -> list[dict]:
         ):
             cycle = hashlib.sha256(deadline_text.encode("utf-8")).hexdigest()[:16]
             results.append(_run_automation_cycle(tenant, "unanswered", cycle, push_text, now))
+    try:
+        results += _run_teacher_notifications(push_text, now)
+    except Exception as exc:
+        results.append({"kind": "teacher", "error": str(exc)[:180]})
     return results
