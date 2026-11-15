@@ -224,6 +224,13 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
   .donelist .day { font-weight: 600; margin-top: 8px; }
   .donelist .tm { margin-left: 12px; }
   button.edit { background: #fff; color: #06783b; border: 1px solid #06C755; }
+  .bulk { display: none; gap: 8px; margin: 4px 0 6px; }
+  .bulk button { width: auto; flex: 1; margin: 0; padding: 10px; font-size: 14px; background: #fff;
+                 color: #06783b; border: 1px solid #06C755; border-radius: 8px; }
+  .bulk button.off { color: #666; border-color: #ccc; }
+  .dayname { display: flex; align-items: center; }
+  .dayall { margin-left: auto; width: auto; padding: 4px 10px; margin-top: 0; font-size: 12px;
+            background: #fff; color: #06783b; border: 1px solid #b6e2c6; border-radius: 14px; }
 </style>
 </head>
 <body>
@@ -246,6 +253,11 @@ LIFF_PAGE_HTML = """<!DOCTYPE html>
 <label id="skipBox" style="border:1px solid #e0c0c0;background:#fdf6f6">
   <input type="checkbox" id="skip" onchange="onSkipChange()">今回は参加できません
 </label>
+
+<div class="bulk" id="bulk">
+  <button type="button" onclick="selectAll(true)">すべて選択</button>
+  <button type="button" class="off" onclick="selectAll(false)">すべて解除</button>
+</div>
 
 <form id="form"></form>
 
@@ -273,6 +285,10 @@ function updateDayCounts() {
     const day = el.getAttribute("data-day-count");
     const n = document.querySelectorAll(`input[data-day="${day}"]:checked`).length;
     el.textContent = n ? `　${n}件選択中` : "";
+  });
+  document.querySelectorAll("[data-day-all]").forEach(btn => {
+    const els = dayInputs(btn.dataset.dayAll);
+    btn.textContent = els.length && els.every(el => el.checked) ? "この日を解除" : "この日すべて";
   });
 }
 
@@ -344,7 +360,8 @@ async function main() {
 
   form.innerHTML = byDay.map(g => `
     <div class="dayblock">
-      <div class="dayname">${g.day}<span class="daycount" data-day-count="${g.day}"></span></div>
+      <div class="dayname">${g.day}<span class="daycount" data-day-count="${g.day}"></span>
+        <button type="button" class="dayall" data-day-all="${g.day}" onclick="toggleDay(this.dataset.dayAll)">この日すべて</button></div>
       <div class="chips">
         ${g.items.map(it => `
           <label class="chip">
@@ -357,6 +374,7 @@ async function main() {
   `).join("");
 
   form.addEventListener("change", updateDayCounts);
+  document.getElementById("bulk").style.display = "flex";
 
   if (data.comment_label) {
     document.getElementById("commentTitle").textContent = data.comment_label;
@@ -399,6 +417,23 @@ async function loadPrevious() {
   } catch (e) {}
 }
 
+function dayInputs(day) {
+  return Array.from(document.querySelectorAll('input[name="candidate"]'))
+    .filter(el => el.dataset.day === day);
+}
+function selectAll(on) {
+  if (document.getElementById("skip").checked) return;
+  document.querySelectorAll('input[name="candidate"]').forEach(el => el.checked = on);
+  updateDayCounts();
+}
+function toggleDay(day) {
+  if (document.getElementById("skip").checked) return;
+  const els = dayInputs(day);
+  const allOn = els.length > 0 && els.every(el => el.checked);
+  els.forEach(el => el.checked = !allOn);
+  updateDayCounts();
+}
+
 function onSkipChange() {
   const off = document.getElementById("skip").checked;
   document.getElementById("form").style.opacity = off ? "0.4" : "1";
@@ -408,6 +443,9 @@ function onSkipChange() {
     locBox.style.opacity = off ? "0.4" : "1";
     locBox.style.pointerEvents = off ? "none" : "auto";
   }
+  const bulk = document.getElementById("bulk");
+  bulk.style.opacity = off ? "0.4" : "1";
+  bulk.style.pointerEvents = off ? "none" : "auto";
   if (off) {
     document.querySelectorAll('input[name="candidate"]:checked').forEach(el => el.checked = false);
     updateDayCounts();
