@@ -787,8 +787,10 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   .gbox.solo { border-style: dashed; }
   .ghead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: #f6fbf8; font-weight: 600; font-size: 14px; }
   .gbox.solo .ghead { background: #fafafa; }
-  .ghead label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ghead label { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
   .ghead .gcount { font-weight: 400; color: #888; font-size: 12px; }
+  .ghead .gfold { background: none; border: none; color: #06783b; font-size: 14px; padding: 0 2px; width: 20px; cursor: pointer; }
+  .gbox.folded .ghead { border-bottom: none; }
   .ghead .gdel { background: none; border: none; color: #b55; font-size: 12px; padding: 2px 4px; cursor: pointer; }
   .gbox .member { padding: 6px 10px; flex-wrap: wrap; gap: 4px 8px; }
   .gbox .member label { flex: 1 1 110px; min-width: 110px; }
@@ -869,6 +871,8 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   <div class="row" style="margin-bottom:8px">
     <button class="sub" onclick="toggleAll(true)">全員選択</button>
     <button class="sub" onclick="toggleAll(false)">全員解除</button>
+    <button class="sub" onclick="foldAll(true)">すべて畳む</button>
+    <button class="sub" onclick="foldAll(false)">すべて開く</button>
   </div>
   <div class="gnew">
     <input id="newGroup" type="text" placeholder="新しいグループ名（例: 火曜A班）" onkeydown="if(event.key==='Enter'&&!event.isComposing&&event.keyCode!==229){event.preventDefault();addGroup();}">
@@ -1109,6 +1113,7 @@ document.addEventListener('touchend', () => {
 });
 
 let MEMBERS = [];      // {name, quota, group, checked}
+const COLLAPSED = new Set((() => { try { return JSON.parse(localStorage.getItem('sendCollapsed') || '[]'); } catch (e) { return []; } })());
 let GROUP_NAMES = [];  // 作成済みのグループ名（並び順どおり）
 let _saveTimer = null;
 
@@ -1195,17 +1200,28 @@ function groupBox(title, key, solo) {
     const opts = MEMBERS.map((m, i) => m.groups.includes(key) ? '' : `<option value="${i}">${i + 1}. ${esc(m.name)}</option>`).join('');
     add = opts ? `<div class="gadd"><select onchange="joinGroup(${keyArg}, this.value)"><option value="">＋ メンバーを追加</option>${opts}</select></div>` : '';
   }
-  return `<div class="gbox${solo ? ' solo' : ''}">
+  const folded = COLLAPSED.has(key);
+  return `<div class="gbox${solo ? ' solo' : ''}${folded ? ' folded' : ''}">
     <div class="ghead">
+      <button type="button" class="gfold" title="${folded ? '開く' : '畳む'}" onclick="toggleFold(${keyArg})">${folded ? '▸' : '▾'}</button>
       <label><input type="checkbox" data-partial="${on > 0 && !allOn ? 1 : 0}"${allOn ? ' checked' : ''}${inGroup.length ? '' : ' disabled'}
         onchange="toggleGroup(${keyArg}, this.checked)"> ${esc(title)}
         <span class="gcount">${inGroup.length}人${inGroup.length ? '・選択 ' + on : ''}</span></label>
       ${solo ? '' : `<button class="gdel" onclick="removeGroup(${keyArg})">グループを削除</button>`}
     </div>
-    ${rows.join('') || `<div class="gempty">${solo ? 'グループに入っていない人はいません。' : 'まだ誰もいません。下の「＋ メンバーを追加」から入れてください。'}</div>`}
-    ${add}
+    ${folded ? '' : (rows.join('') || `<div class="gempty">${solo ? 'グループに入っていない人はいません。' : 'まだ誰もいません。下の「＋ メンバーを追加」から入れてください。'}</div>`)}
+    ${folded ? '' : add}
   </div>`;
 }
+function toggleFold(key) {
+  if (COLLAPSED.has(key)) COLLAPSED.delete(key); else COLLAPSED.add(key);
+  saveFold(); renderMembers();
+}
+function foldAll(on) {
+  if (on) { allGroupNames().forEach(g => COLLAPSED.add(g)); COLLAPSED.add(''); } else COLLAPSED.clear();
+  saveFold(); renderMembers();
+}
+function saveFold() { try { localStorage.setItem('sendCollapsed', JSON.stringify([...COLLAPSED])); } catch (e) {} }
 function renderMembers() {
   const box = document.getElementById('members');
   if (!MEMBERS.length) {
