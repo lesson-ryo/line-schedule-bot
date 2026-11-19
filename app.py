@@ -891,13 +891,16 @@ ADMIN_PANEL_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<h2>6. 確定した日程を各自に送る</h2>
+<h2 id="sec6">6. 確定した日程を各自に送る</h2>
 <div class="card">
+  <div id="savedNotice" style="display:none;background:#f0f9f3;border:1px solid #b6e2c6;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:14px"></div>
+  <div class="lbl">保存した割り当て</div>
+  <div id="savedList" class="muted" style="margin-bottom:12px">読み込み中...</div>
   <div class="lbl">通知メッセージの前置き</div>
   <textarea id="notifyMessage" rows="2" oninput="saveNotifyMessage()"></textarea>
   <div class="row" style="margin-top:8px">
-    <button class="sub" onclick="go('schedule')">担当を手動で調整する</button>
-    <button class="sub" onclick="goNotify()">送信内容を確認する</button>
+    <button class="sub" onclick="go('schedule')">割り当てを手動で調整する</button>
+    <button id="notifyBtn" class="sub" onclick="goNotify()">送信内容を確認する（確定LINE）</button>
     <button class="mini" onclick="resetNotifyMessage()">初期文に戻す</button>
   </div>
   <div class="muted" style="margin-top:8px">
@@ -1284,11 +1287,44 @@ function runAssign() {
     + '&groups=' + encodeURIComponent(gs.join('|'));
 }
 
+async function loadSaved() {
+  const box = document.getElementById('savedList');
+  try {
+    const res = await fetch('/admin/schedule.json?token=' + encodeURIComponent(TOKEN));
+    const d = await res.json();
+    const list = d.schedule || [];
+    if (!list.length) { box.textContent = 'まだ割り当てがありません。「時間枠を自動で割り当てる」か「割り当てを手動で調整する」から作ってください。'; return; }
+    const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:14px;color:#222">', last = '';
+    list.forEach(s => {
+      if (s.day !== last) { html += '<tr><td colspan="4" style="padding:8px 4px 4px;font-weight:600;color:#06783b">' + esc(s.day) + '</td></tr>'; last = s.day; }
+      html += '<tr style="border-top:1px solid #f0f0f0"><td style="padding:5px 4px;white-space:nowrap">' + esc(s.time) + '〜' + esc(s.end) + '</td>'
+        + '<td style="padding:5px 4px">' + esc(s.name) + (s.is_group ? ' <span style="font-size:11px;color:#888">グループ</span>' : '') + '</td>'
+        + '<td style="padding:5px 4px;font-size:12px;color:#666">' + esc(s.location || '') + '</td>'
+        + '<td style="padding:5px 4px;font-size:12px;color:#666">' + esc(s.fee || '') + '</td></tr>';
+    });
+    box.className = ''; box.innerHTML = html + '</table>';
+  } catch (e) { box.textContent = '割り当ての読み込みに失敗しました: ' + e; }
+}
+function showSavedNotice() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('saved')) return;
+  const n = document.getElementById('savedNotice');
+  n.innerHTML = '<b>✓ 割り当てを保存しました（' + (parseInt(q.get('saved'), 10) || 0) + '件）</b><br>下の内容を確認して、「送信内容を確認する（確定LINE）」から生徒さんへ送ってください。'
+    + (q.get('cal') === 'ng' ? '<br><span style="color:#b33">Googleカレンダーには反映できませんでした。講師ホームから再同期してください。</span>' : '');
+  n.style.display = 'block';
+  const btn = document.getElementById('notifyBtn');
+  btn.className = ''; // 目立つ緑のボタンにする
+  setTimeout(() => document.getElementById('sec6').scrollIntoView({ behavior: 'smooth' }), 300);
+}
+
 initMessage();
 initNotify();
 renderGrid();
 renderPreview();
 loadMembers();
+loadSaved();
+showSavedNotice();
 </script>
 </body>
 </html>
@@ -1626,16 +1662,25 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
   #msg { margin-top: 10px; padding: 10px; border-radius: 8px; font-size: 13px; display: none; }
   #msg.ok { background: #f0f9f3; border: 1px solid #b6e2c6; display: block; }
   #msg.err { background: #fdf2f2; border: 1px solid #e0b4b4; display: block; }
+  /* パソコンでは左にレッスン一覧、右に集計表 */
+  @media (min-width: 1000px) {
+    body { max-width: 1320px; }
+    .cols { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 16px; align-items: start; }
+    .leftcol { grid-column: 1; grid-row: 1; }
+    .boardcard { grid-column: 2; grid-row: 1; position: sticky; top: 12px; max-height: calc(100vh - 96px); overflow: auto; }
+  }
 </style>
 </head>
 <body>
 <h1>割り当ての調整</h1>
 
-<div class="card">
+<div class="cols">
+<div class="card boardcard">
   <h2>集計表 <span class="muted">名前を押すと、その時間にレッスンを追加します</span><button class="toggle" onclick="toggleBoard()">表示/非表示</button></h2>
   <div id="board"></div>
 </div>
 
+<div class="leftcol">
 <div class="card">
   <h2>レッスン一覧</h2>
   <div class="muted">日付・時間・生徒・教室・料金を自由に変更できます。「料金」は確定のお知らせに載ります（空欄なら載りません）。</div>
@@ -1648,6 +1693,8 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
   <ul id="warns"></ul>
 </div>
 <div id="msg"></div>
+</div>
+</div>
 
 <div class="bar">
   <button onclick="save()">この内容で保存する</button>
@@ -1847,7 +1894,11 @@ async function save() {
     let note = '';
     if (res.ok && r.calendar && r.calendar.configured) note = r.calendar.ok ? ' Googleカレンダーにも同期しました。' : ' Googleカレンダーは未反映です。講師ホームから再同期してください。';
     box.textContent = res.ok ? ('保存しました。確定のお知らせにはこの内容が使われます。' + note) : ('エラー: ' + (r.error || ''));
-    if (res.ok) { await load(); }
+    if (res.ok) {
+      const n = (r.schedule || []).length;
+      location.href = '/admin/panel?token=' + encodeURIComponent(TOKEN) + '&saved=' + n + (r.calendar && r.calendar.configured && !r.calendar.ok ? '&cal=ng' : '');
+      return;
+    }
     box.scrollIntoView({ behavior: 'smooth' });
   } catch (e) { box.className = 'err'; box.textContent = 'エラー: ' + e; }
 }
