@@ -1584,21 +1584,45 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
 <title>割り当ての調整</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; max-width: 760px; margin: 0 auto; padding: 20px; color: #222; background: #fafafa; }
-  h1 { font-size: 20px; }
-  .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 16px; }
-  .day { font-weight: 600; color: #06783b; background: #f6fbf8; padding: 8px 10px; border-radius: 6px; margin: 14px 0 6px; }
-  .slot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid #f2f2f2; }
-  .slot input.fee { flex-basis: 100%; margin-left: 126px; padding: 7px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
-  .slot.changed input.fee { border-color: #06C755; }
-  @media (max-width: 560px) { .slot input.fee { margin-left: 0; } }
-  .slot .tm { width: 116px; font-size: 14px; white-space: nowrap; }
-  .slot select { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-  .slot .loc { font-size: 12px; color: #888; white-space: nowrap; }
-  .slot.changed select { border-color: #06C755; background: #f4fbf7; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; max-width: 860px; margin: 0 auto; padding: 16px 16px 90px; color: #222; background: #fafafa; }
+  h1 { font-size: 20px; margin: 4px 0 12px; }
+  h2 { font-size: 16px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .muted { color: #888; font-size: 12px; }
+  .toggle { margin-left: auto; font-size: 12px; background: none; border: 1px solid #ddd; color: #555; padding: 4px 10px; border-radius: 14px; }
+  .bday { font-weight: 700; color: #06783b; margin: 12px 0 4px; font-size: 14px; }
+  .brow { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-top: 1px solid #f1f1f1; }
+  .brow .bt { width: 48px; flex: 0 0 48px; font-size: 13px; padding-top: 4px; color: #555; }
+  .brow .bp { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; }
+  .pchip { border: 1px solid #cfd6da; background: #fff; border-radius: 14px; padding: 4px 9px; font-size: 13px; cursor: pointer; color: #333; }
+  .pchip small { color: #888; margin-left: 3px; font-size: 10px; }
+  .pchip.done { background: #e8f4ef; border-color: #b6e2c6; color: #0f6e56; }
+  .pchip.done::before { content: "✓ "; }
+  .busy { font-size: 11px; color: #b06000; background: #fff3dd; border-radius: 10px; padding: 3px 8px; }
+  .none { font-size: 12px; color: #bbb; padding-top: 4px; }
+  .list2 { font-size: 13px; line-height: 1.7; }
+  .list2 b { display: inline-block; min-width: 92px; color: #555; }
+  .lday { font-weight: 700; color: #06783b; background: #f6fbf8; padding: 7px 10px; border-radius: 6px; margin: 14px 0 6px; display: flex; align-items: center; }
+  .lday button { margin-left: auto; }
+  .lrow { border: 1px solid #e6e6e6; border-radius: 9px; padding: 9px; margin-bottom: 8px; background: #fff; }
+  .lrow.warn { border-color: #f0b400; background: #fffaf0; }
+  .lrow .r { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .lrow .r + .r { margin-top: 6px; }
+  .lrow input, .lrow select { padding: 7px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: #fff; }
+  .lrow input.day { width: 108px; }
+  .lrow input[type=time] { width: 104px; }
+  .lrow select.who { flex: 1; min-width: 140px; }
+  .lrow select.loc { min-width: 120px; }
+  .lrow input.fee { flex: 1; min-width: 180px; font-size: 13px; }
+  .len { font-size: 12px; padding: 6px 8px; border: 1px solid #b6e2c6; background: #fff; color: #06783b; border-radius: 6px; cursor: pointer; }
+  .del { margin-left: auto; font-size: 12px; padding: 6px 10px; border: 1px solid #e0b4b4; background: #fff; color: #b33; border-radius: 6px; cursor: pointer; }
+  .wtxt { font-size: 12px; color: #a06000; width: 100%; }
   button { padding: 10px 16px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; background: #06C755; color: #fff; }
   button.sub { background: #eee; color: #333; }
-  .muted { color: #888; font-size: 13px; }
+  button.small { padding: 5px 10px; font-size: 12px; background: #fff; color: #06783b; border: 1px solid #b6e2c6; }
+  #warns { font-size: 13px; }
+  #warns li { margin: 3px 0; color: #8a5900; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ddd; padding: 10px 16px; display: flex; gap: 8px; justify-content: center; z-index: 5; }
   #msg { margin-top: 10px; padding: 10px; border-radius: 8px; font-size: 13px; display: none; }
   #msg.ok { background: #f0f9f3; border: 1px solid #b6e2c6; display: block; }
   #msg.err { background: #fdf2f2; border: 1px solid #e0b4b4; display: block; }
@@ -1606,83 +1630,235 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <h1>割り当ての調整</h1>
+
 <div class="card">
-  <div class="muted">担当を入れ替えたり、空きに変更できます。変更した行は緑色になります。<br>「料金」に入れた内容は、確定のお知らせに「料金: 〜」として載ります（空欄なら載りません）。</div>
+  <h2>集計表 <span class="muted">名前を押すと、その時間にレッスンを追加します</span><button class="toggle" onclick="toggleBoard()">表示/非表示</button></h2>
+  <div id="board"></div>
+</div>
+
+<div class="card">
+  <h2>レッスン一覧</h2>
+  <div class="muted">日付・時間・生徒・教室・料金を自由に変更できます。「料金」は確定のお知らせに載ります（空欄なら載りません）。</div>
   <div id="list"></div>
-  <div style="margin-top:16px">
-    <button onclick="save()">この内容で保存する</button>
-    <button class="sub" onclick="location.href='/admin/panel?token=' + encodeURIComponent(TOKEN)">戻る</button>
-  </div>
-  <div id="msg"></div>
+  <div style="margin-top:10px"><button class="small" onclick="addRow(lastDay())">＋ レッスンを追加</button></div>
+</div>
+
+<div class="card" id="warnCard" style="display:none">
+  <h2>確認してほしいこと</h2>
+  <ul id="warns"></ul>
+</div>
+<div id="msg"></div>
+
+<div class="bar">
+  <button onclick="save()">この内容で保存する</button>
+  <button class="sub" onclick="location.href='/admin/panel?token=' + encodeURIComponent(TOKEN)">戻る</button>
 </div>
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
-let data = null;
+let data = null, rows = [], boardOpen = true;
 
-function render() {
-  const box = document.getElementById('list');
-  if (!data.schedule.length) {
-    box.innerHTML = '<p class="muted">割り当てがありません。先に「時間枠を自動で割り当てる」を実行してください。</p>';
-    return;
-  }
-  const opts = ['<option value="">（空き）</option>']
-    .concat(data.names.map(n => '<option value="' + n + '">' + n + '</option>')).join('');
-  let html = '', lastDay = '';
-  data.schedule.forEach((s, i) => {
-    if (s.day !== lastDay) { html += '<div class="day">' + s.day + '</div>'; lastDay = s.day; }
-    html += '<div class="slot" id="slot' + i + '">'
-      + '<span class="tm">' + s.time + '-' + s.end + '</span>'
-      + '<select data-i="' + i + '" onchange="mark(' + i + ')">' + opts + '</select>'
-      + '<span class="loc">' + (s.location || '') + '</span>'
-      + '<input class="fee" data-f="' + i + '" maxlength="200" oninput="mark(' + i + ')" placeholder="料金（例：レッスン料 4,500円＋部屋代 459円＝4,959円）">'
-      + '</div>';
+function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toMin(t) { const p = String(t || '').split(':'); return p.length === 2 ? parseInt(p[0], 10) * 60 + parseInt(p[1], 10) : NaN; }
+function toTime(m) { return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); }
+function pad(t) { const m = toMin(t); return isNaN(m) ? '' : String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+function ent(name) { return (data.entities || []).find(e => e.name === name); }
+function dayOrder(d) { const p = String(d || '').split('/'); const mo = parseInt(p[0], 10), da = parseInt(p[1] || '', 10); return (isNaN(mo) || isNaN(da)) ? 9999 : mo * 100 + da; }
+function allDays() {
+  const s = new Set((data.board.days || []).concat(rows.map(r => r.day)).filter(Boolean));
+  return [...s].sort((a, b) => dayOrder(a) - dayOrder(b));
+}
+function lastDay() { const d = allDays(); return d.length ? d[0] : ''; }
+function personInRows(name) {
+  return rows.some(r => r.name === name || (ent(r.name) && ent(r.name).is_group && (data.groupMembers[r.name] || []).includes(name)));
+}
+
+function renderBoard() {
+  const box = document.getElementById('board');
+  if (!boardOpen) { box.innerHTML = '<p class="muted">非表示中</p>'; return; }
+  const b = data.board;
+  if (!b.slots.length) { box.innerHTML = '<p class="muted">日程の候補がありません。</p>'; return; }
+  let html = '';
+  b.days.forEach(day => {
+    html += '<div class="bday">' + esc(day) + '</div>';
+    const busy = (b.busy[day] || []).map(x => '<span class="busy">他の地域: ' + toTime(x[0] * 30) + '〜' + toTime(x[1] * 30) + (x[2] ? '（オンライン）' : '（対面）') + '</span>').join(' ');
+    if (busy) html += '<div style="margin:2px 0 4px">' + busy + '</div>';
+    b.slots.filter(s => s.day === day).forEach(s => {
+      const chips = s.people.map(p => {
+        const done = personInRows(p.name) ? ' done' : '';
+        return '<button class="pchip' + done + '" onclick="addFromBoard(' + esc(JSON.stringify(day)) + ',' + esc(JSON.stringify(s.time)) + ',' + esc(JSON.stringify(p.name)) + ',' + esc(JSON.stringify(p.location || '')) + ')">'
+          + esc(p.name) + (p.location ? '<small>' + esc(p.location.replace('教室', '')) + '</small>' : '') + '</button>';
+      }).join('');
+      html += '<div class="brow"><span class="bt">' + esc(s.time) + '</span><div class="bp">' + (chips || '<span class="none">なし</span>') + '</div></div>';
+    });
   });
+  html += '<div class="list2" style="margin-top:12px">'
+    + '<div><b>参加できない</b>' + (b.skips.length ? esc(b.skips.join('、')) : '—') + '</div>'
+    + '<div><b>未回答</b>' + (b.nonrespondents.length ? esc(b.nonrespondents.join('、')) : '—') + '</div>'
+    + (b.comments.length ? '<div><b>コメント</b></div>' + b.comments.map(c => '<div style="margin-left:12px">・' + esc(c.name) + '：' + esc(c.text) + '</div>').join('') : '')
+    + '</div>';
   box.innerHTML = html;
-  data.schedule.forEach((s, i) => {
-    const sel = document.querySelector('select[data-i="' + i + '"]');
-    sel.value = s.name || '';
-    sel.dataset.orig = s.name || '';
-    const fee = document.querySelector('input[data-f="' + i + '"]');
-    fee.value = s.fee || '';
-    fee.dataset.orig = s.fee || '';
+}
+function toggleBoard() { boardOpen = !boardOpen; renderBoard(); }
+
+function locOptions(cur) {
+  const list = [''].concat(data.locations || []);
+  if (cur && !list.includes(cur)) list.push(cur);
+  return list.map(l => '<option value="' + esc(l) + '"' + (l === cur ? ' selected' : '') + '>' + (l ? esc(l) : '（教室なし）') + '</option>').join('');
+}
+function whoOptions(cur) {
+  const list = [''].concat(data.names);
+  if (cur && !list.includes(cur)) list.push(cur);
+  return list.map(n => {
+    const e = ent(n);
+    const label = n ? n + (e && e.is_group ? '（グループ' + e.size + '人）' : '') : '（未選択）';
+    return '<option value="' + esc(n) + '"' + (n === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
+  }).join('');
+}
+
+function renderList() {
+  const box = document.getElementById('list');
+  const warnings = computeWarnings();
+  if (!rows.length) { box.innerHTML = '<p class="muted">まだレッスンがありません。上の集計表の名前を押すか、「＋ レッスンを追加」で入れてください。</p>'; renderWarns(warnings); return; }
+  const order = rows.map((r, i) => i).sort((a, b) => (dayOrder(rows[a].day) - dayOrder(rows[b].day)) || (toMin(rows[a].time) - toMin(rows[b].time)));
+  let html = '', last = null;
+  order.forEach(i => {
+    const r = rows[i];
+    if (r.day !== last) {
+      html += '<div class="lday">' + esc(r.day || '（日付未入力）') + '<button class="small" onclick="addRow(' + esc(JSON.stringify(r.day)) + ')">＋ この日に追加</button></div>';
+      last = r.day;
+    }
+    const w = warnings.byRow[i] || [];
+    const mins = toMin(r.end) - toMin(r.time);
+    html += '<div class="lrow' + (w.length ? ' warn' : '') + '">'
+      + '<div class="r">'
+      + '<input class="day" list="dayList" value="' + esc(r.day) + '" onchange="setDay(' + i + ',this.value)">'
+      + '<input type="time" step="900" value="' + pad(r.time) + '" onchange="setStart(' + i + ',this.value)">'
+      + '〜<input type="time" step="900" value="' + pad(r.end) + '" onchange="setEnd(' + i + ',this.value)">'
+      + '<span class="muted">' + (isNaN(mins) ? '' : mins + '分') + '</span>'
+      + [60, 90, 120].map(m => '<button class="len" onclick="setLen(' + i + ',' + m + ')">' + m + '分</button>').join('')
+      + '</div><div class="r">'
+      + '<select class="who" onchange="setWho(' + i + ',this.value)">' + whoOptions(r.name) + '</select>'
+      + '<select class="loc" onchange="setLoc(' + i + ',this.value)">' + locOptions(r.location) + '</select>'
+      + '</div><div class="r">'
+      + '<input class="fee" maxlength="200" value="' + esc(r.fee || '') + '" oninput="rows[' + i + '].fee=this.value" placeholder="料金（例：レッスン料 4,500円＋部屋代 459円＝4,959円）">'
+      + '<button class="del" onclick="delRow(' + i + ')">削除</button>'
+      + (w.length ? '<div class="wtxt">⚠ ' + esc(w.join(' / ')) + '</div>' : '')
+      + '</div></div>';
   });
+  html += '<datalist id="dayList">' + allDays().map(d => '<option value="' + esc(d) + '">').join('') + '</datalist>';
+  box.innerHTML = html;
+  renderWarns(warnings);
 }
-function mark(i) {
-  const sel = document.querySelector('select[data-i="' + i + '"]');
-  const fee = document.querySelector('input[data-f="' + i + '"]');
-  document.getElementById('slot' + i).classList.toggle('changed', sel.value !== sel.dataset.orig || fee.value !== fee.dataset.orig);
+function renderWarns(w) {
+  const card = document.getElementById('warnCard');
+  card.style.display = w.all.length ? 'block' : 'none';
+  document.getElementById('warns').innerHTML = w.all.map(t => '<li>' + esc(t) + '</li>').join('');
 }
+
+function computeWarnings() {
+  const byRow = {}, all = [];
+  const add = (i, t) => { (byRow[i] = byRow[i] || []).push(t); };
+  rows.forEach((r, i) => {
+    if (!r.name) add(i, '生徒が未選択（保存されません）');
+    if (isNaN(toMin(r.time)) || isNaN(toMin(r.end)) || toMin(r.end) <= toMin(r.time)) add(i, '時間を確認してください');
+  });
+  const isOnline = r => r.location === 'オンライン' || data.all_online;
+  for (let a = 0; a < rows.length; a++) for (let b = a + 1; b < rows.length; b++) {
+    const A = rows[a], B = rows[b];
+    if (!A.day || A.day !== B.day) continue;
+    const a1 = toMin(A.time), a2 = toMin(A.end), b1 = toMin(B.time), b2 = toMin(B.end);
+    if (a1 < b2 && b1 < a2) { add(a, '他のレッスンと時間が重なっています'); add(b, '他のレッスンと時間が重なっています'); continue; }
+    const gap = a2 <= b1 ? b1 - a2 : a1 - b2;
+    const placeA = isOnline(A) ? 'オンライン' : (A.location || '').replace('（どちらでもOK）', '');
+    const placeB = isOnline(B) ? 'オンライン' : (B.location || '').replace('（どちらでもOK）', '');
+    if (placeA && placeB && placeA !== placeB && gap < 60) {
+      const t = '場所が変わるのに間が' + gap + '分しかありません（' + placeA + '→' + placeB + '）';
+      add(a, t); add(b, t);
+    }
+  }
+  rows.forEach((r, i) => {
+    (data.board.busy[r.day] || []).forEach(x => {
+      const s = x[0] * 30, e = x[1] * 30, r1 = toMin(r.time), r2 = toMin(r.end);
+      if (r1 < e && s < r2) add(i, '他の地域の予定と重なっています（保存できません）');
+      else if ((x[2] !== isOnline(r)) && (Math.min(Math.abs(r1 - e), Math.abs(s - r2)) < 60)) add(i, '他の地域の予定との間が1時間未満です');
+    });
+  });
+  const counts = {};
+  rows.forEach(r => { if (r.name) counts[r.name] = (counts[r.name] || 0) + 1; });
+  Object.keys(counts).forEach(n => { if (counts[n] > 1) all.push(n + 'さんが' + counts[n] + '回入っています（意図どおりならOK）'); });
+  const voted = new Set();
+  data.board.slots.forEach(s => s.people.forEach(p => voted.add(p.name)));
+  const missing = [...voted].filter(n => !personInRows(n));
+  if (missing.length) all.push('回答したのにレッスンが入っていない人: ' + missing.join('、'));
+  Object.keys(byRow).forEach(i => byRow[i] = [...new Set(byRow[i])]);
+  const rowWarn = Object.values(byRow).flat();
+  [...new Set(rowWarn)].forEach(t => all.unshift(t));
+  return { byRow, all: [...new Set(all)] };
+}
+
+function refresh() { renderList(); renderBoard(); }
+function setDay(i, v) { rows[i].day = v.trim(); refresh(); }
+function setEnd(i, v) { rows[i].end = v; refresh(); }
+function setLoc(i, v) { rows[i].location = v; refresh(); }
+function setStart(i, val) {
+  const r = rows[i], len = toMin(r.end) - toMin(r.time);
+  r.time = val;
+  if (!isNaN(len) && len > 0 && !isNaN(toMin(val))) r.end = toTime(toMin(val) + len);
+  refresh();
+}
+function setLen(i, m) { const r = rows[i]; if (!isNaN(toMin(r.time))) { r.end = toTime(toMin(r.time) + m); refresh(); } }
+function setWho(i, name) {
+  const r = rows[i], e = ent(name);
+  r.name = name;
+  if (e && e.location && !r.location) r.location = e.location;
+  if (e && r.fresh && !isNaN(toMin(r.time))) r.end = toTime(toMin(r.time) + e.minutes);
+  refresh();
+}
+function delRow(i) { rows.splice(i, 1); refresh(); }
+function addRow(day, time = '', name = '', loc = '') {
+  const e = ent(name);
+  const start = time || '10:00';
+  const minutes = e ? e.minutes : 60;
+  rows.push({ src: null, day: day || '', time: start, end: toTime(toMin(start) + minutes), name: name || '',
+              location: loc || (e && e.location) || '', fee: '', fresh: !name });
+  refresh();
+}
+function addFromBoard(day, time, person, loc) {
+  // その人が入っているグループがあれば選べるように（初期は個人）
+  addRow(day, time, person, (loc && loc !== 'どちらでもOK') ? loc : '');
+  document.getElementById('list').lastElementChild && window.scrollTo({ top: document.getElementById('list').getBoundingClientRect().top + window.scrollY - 60, behavior: 'smooth' });
+}
+
 async function save() {
-  const names = Array.from(document.querySelectorAll('select[data-i]')).map(s => s.value);
-  const fees = Array.from(document.querySelectorAll('input[data-f]')).map(f => f.value.trim());
-  const dup = names.filter((n, i) => n && names.indexOf(n) !== i);
-  if (dup.length && !confirm('同じ人が複数の枠に入っています（' + [...new Set(dup)].join('、') + '）。このまま保存しますか？')) return;
+  const blocked = rows.some((r, i) => (computeWarnings().byRow[i] || []).some(t => t.indexOf('時間を確認') >= 0));
+  if (blocked) { alert('時間が正しくないレッスンがあります。直してから保存してください。'); return; }
+  const w = computeWarnings();
+  if (w.all.length && !confirm('確認してほしいことが' + w.all.length + '件あります。このまま保存しますか？')) return;
   const box = document.getElementById('msg');
   box.className = ''; box.style.display = 'none';
   try {
     const res = await fetch('/admin/schedule/save?token=' + encodeURIComponent(TOKEN), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ names: names, fees: fees }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: rows.filter(r => r.name).map(r => ({ src: r.src, day: r.day, time: r.time, end: r.end, name: r.name, location: r.location, fee: (r.fee || '').trim() })) }),
     });
     const r = await res.json();
     box.className = res.ok ? 'ok' : 'err';
-    let calendarNote = '';
-    if (res.ok && r.calendar && r.calendar.configured) {
-      calendarNote = r.calendar.ok ? ' Googleカレンダーにも同期しました。' : ' Googleカレンダーは未反映です。講師ホームから再同期してください。';
-    }
-    box.textContent = res.ok ? ('保存しました。通知にはこの内容が使われます。' + calendarNote) : ('エラー: ' + (r.error || ''));
-    if (res.ok) { data = r; render(); }
-  } catch (e) {
-    box.className = 'err'; box.textContent = 'エラー: ' + e;
-  }
+    let note = '';
+    if (res.ok && r.calendar && r.calendar.configured) note = r.calendar.ok ? ' Googleカレンダーにも同期しました。' : ' Googleカレンダーは未反映です。講師ホームから再同期してください。';
+    box.textContent = res.ok ? ('保存しました。確定のお知らせにはこの内容が使われます。' + note) : ('エラー: ' + (r.error || ''));
+    if (res.ok) { await load(); }
+    box.scrollIntoView({ behavior: 'smooth' });
+  } catch (e) { box.className = 'err'; box.textContent = 'エラー: ' + e; }
 }
-(async () => {
+async function load() {
   const res = await fetch('/admin/schedule.json?token=' + encodeURIComponent(TOKEN));
   data = await res.json();
-  render();
-})();
+  data.groupMembers = data.groupMembers || {};
+  rows = (data.schedule || []).map((s, i) => ({ src: i, day: s.day, time: s.time, end: s.end, name: s.name || '', location: s.location || '', fee: s.fee || '' }));
+  refresh();
+}
+load();
 </script>
 </body>
 </html>
@@ -1706,10 +1882,18 @@ def _entity_directory():
         e["name"]: {
             "member_ids": list(e["member_ids"]),
             "is_group": e["is_group"],
-            "location": e["location"],
+            "location": e["location"] if e["location"] != assign_mod.ANY_LOCATION else "",
         }
         for e in entities.values()
     }
+    # 回答していないグループも選べるようにする
+    members_by_id = {m["user_id"]: m for m in load_json("members")}
+    for user_id, value in groups.items():
+        for gname in assign_mod.group_list(value):
+            if user_id in members_by_id:
+                row = directory.setdefault(gname, {"member_ids": [], "is_group": True, "location": ""})
+                if row.get("is_group") and user_id not in row["member_ids"]:
+                    row["member_ids"].append(user_id)
     # 回答していない人も手動で入れられるようにしておく
     for m in load_json("members"):
         directory.setdefault(
@@ -1726,13 +1910,76 @@ def admin_schedule():
     return SCHEDULE_EDIT_HTML
 
 
+def default_lesson_minutes(is_group: bool, size: int) -> int:
+    """料金表どおりの長さ：個人60分、2人組120分、3人以上90分"""
+    if not is_group:
+        return 60
+    return 120 if size <= 2 else 90
+
+
+def _schedule_board():
+    """調整画面の上に出す集計表（誰がどの時間に○を付けたか）"""
+    import assign as assign_mod
+    from lesson_operations import other_tenant_busy
+
+    candidates = load_json("candidates", default=[])
+    votes = load_json("votes")
+    members = load_json("members")
+    names = {m["user_id"]: m["display_name"] for m in members}
+    locations = {l["user_id"]: l["location"] for l in load_json("locations")}
+    comments = {c["user_id"]: c.get("text", "") for c in load_json("comments")}
+    skips = [str(u) for u in load_json("skips", default=[]) or []]
+    targets = load_json("schedule_targets", default=[]) or []
+
+    slots = []
+    for i, label in enumerate(candidates, start=1):
+        day, time_ = assign_mod.split_slot(label)
+        people = []
+        for v in votes:
+            if v.get("candidate_index") == i:
+                uid = v.get("user_id", "")
+                people.append({"name": names.get(uid, v.get("display_name", uid)), "location": locations.get(uid, "")})
+        slots.append({"day": day, "time": time_, "people": people})
+
+    voted = {v.get("user_id") for v in votes}
+    pool = [m for m in members if not targets or m["user_id"] in targets]
+    days = list(dict.fromkeys(s["day"] for s in slots))
+    return {
+        "slots": slots,
+        "days": days,
+        "skips": [names.get(u, u) for u in skips],
+        "nonrespondents": [m["display_name"] for m in pool if m["user_id"] not in voted and m["user_id"] not in skips],
+        "comments": [{"name": names.get(u, u), "text": t} for u, t in comments.items() if t.strip()],
+        "busy": other_tenant_busy(get_tenant().name, days),
+    }
+
+
 @app.route("/admin/schedule.json", methods=["GET"])
 def admin_schedule_json():
     """調整画面が読み込む、現在の割り当てと選択肢"""
     check_admin_token()
+    directory = _entity_directory()
+    names_by_id = {m["user_id"]: m["display_name"] for m in load_json("members")}
     return {
         "schedule": load_json("assignment", default=[]),
-        "names": sorted(_entity_directory().keys()),
+        "names": sorted(directory.keys()),
+        "entities": [
+            {
+                "name": name,
+                "is_group": info["is_group"],
+                "size": len(info["member_ids"]),
+                "location": info.get("location", ""),
+                "minutes": default_lesson_minutes(info["is_group"], len(info["member_ids"])),
+            }
+            for name, info in sorted(directory.items())
+        ],
+        "locations": [l for l in LOCATIONS if l != "どちらでもOK"],
+        "board": _schedule_board(),
+        "groupMembers": {
+            name: [names_by_id.get(u, u) for u in info["member_ids"]]
+            for name, info in directory.items() if info["is_group"]
+        },
+        "all_online": get_tenant().name == "online",
     }
 
 
@@ -1741,6 +1988,8 @@ def admin_schedule_save():
     """調整した割り当てを保存する。空欄にした枠は削除される。"""
     check_admin_token()
     body = request.get_json(silent=True) or {}
+    if "rows" in body:
+        return _save_schedule_rows(body.get("rows") or [])
     names = body.get("names", [])
     fees = body.get("fees")
 
@@ -1786,6 +2035,74 @@ def admin_schedule_save():
         "names": sorted(directory.keys()),
         "calendar": calendar_result,
     }
+
+
+def _save_schedule_rows(rows: list):
+    """自由に編集した一覧（日付・開始・終了・生徒・教室・料金）を保存する"""
+    import re as re_mod
+
+    original = load_json("assignment", default=[])
+    directory = _entity_directory()
+    updated = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        info = directory.get(name)
+        if not info:
+            return {"error": f"「{name}」が見つかりません。"}, 400
+        day = str(row.get("day") or "").strip()
+        start = str(row.get("time") or "").strip()
+        end = str(row.get("end") or "").strip()
+        if not day or not re_mod.fullmatch(r"\d{1,2}:\d{2}", start) or not re_mod.fullmatch(r"\d{1,2}:\d{2}", end):
+            return {"error": f"「{name}」の日付か時刻が正しくありません。"}, 400
+        sh, sm = map(int, start.split(":"))
+        eh, em = map(int, end.split(":"))
+        if eh * 60 + em <= sh * 60 + sm:
+            return {"error": f"「{name}」の終了時刻が開始より前になっています。"}, 400
+        src = row.get("src")
+        slot = dict(original[src]) if isinstance(src, int) and 0 <= src < len(original) else {}
+        changed_time = (slot.get("day"), slot.get("time"), slot.get("end")) != (day, f"{sh}:{sm:02d}", f"{eh}:{em:02d}")
+        if changed_time or slot.get("name") != name:
+            slot.pop("lesson_id", None)  # 別のレッスンとして扱う
+        slot.update(
+            day=day,
+            time=f"{sh}:{sm:02d}",
+            end=f"{eh}:{em:02d}",
+            name=name,
+            member_ids=list(info["member_ids"]),
+            is_group=info["is_group"],
+            location=str(row.get("location") or "").strip() or info.get("location", ""),
+            absent=[],
+            manual=True,
+            start_unit=sh * 2 + (1 if sm >= 30 else 0),
+            length=max(1, ((eh * 60 + em) - (sh * 60 + sm) + 29) // 30),
+        )
+        fee = str(row.get("fee") or "").strip()[:200]
+        if fee:
+            slot["fee"] = fee
+        else:
+            slot.pop("fee", None)
+        updated.append(slot)
+
+    from lesson_operations import cross_tenant_conflicts, parse_schedule_date
+
+    def sort_key(s):
+        d = parse_schedule_date(s.get("day", ""))
+        h, m = map(int, s["time"].split(":"))
+        return (d.isoformat() if d else s.get("day", ""), h * 60 + m)
+
+    updated.sort(key=sort_key)
+    conflicts = cross_tenant_conflicts(get_tenant().name, updated)
+    if conflicts:
+        return {"error": "地域をまたぐ日程重複があります。 " + " ".join(conflicts)}, 409
+    save_json("assignment", updated)
+    from lesson_operations import sync_calendar_schedule
+
+    calendar_result = sync_calendar_schedule(get_tenant().name)
+    return {"ok": True, "schedule": updated, "calendar": calendar_result}
 
 
 @app.route("/admin/notify", methods=["GET"])

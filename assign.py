@@ -4,8 +4,8 @@
 回答（誰がどの枠に○を付けたか）をもとに、次の条件で枠を割り当てる。
 
 - 1つの時間帯には1組だけ
-- 個人レッスンは1時間、グループレッスンは連続した2時間
-- 2時間では全員が収まらない場合、必要な分だけグループを1.5時間に短縮して再試行する
+- 個人レッスンは1時間、2人組は連続した2時間、3人以上のグループは1.5時間（料金表どおり）
+- 2時間では全員が収まらない場合、必要な分だけ2人組を1.5時間に短縮して再試行する
 - 開始時刻は30分単位（10:00 だけでなく 10:30 開始も可）
 - グループは「参加できる人数が最も多い時間帯」に入れる（全員でなくてもよい）
 - 使う日数をできるだけ少なくし、同じ日の中では連続した時間になるようにする
@@ -39,8 +39,13 @@ ONLINE_GAP_UNITS = 2
 UNITS_PER_HOUR = 2
 
 INDIVIDUAL_UNITS = 2  # 個人レッスン 1時間
-GROUP_UNITS = 4       # グループレッスン 2時間
-GROUP_UNITS_SHORT = 3  # 短縮時 1.5時間
+GROUP_UNITS = 4       # 2人組 2時間
+GROUP_UNITS_SHORT = 3  # 3人以上は1.5時間（2人組も入りきらないときは1.5時間に短縮）
+
+
+def group_units(entity) -> int:
+    """料金表どおり：2人組は2時間、3人以上は1.5時間"""
+    return GROUP_UNITS if len(entity.get("member_ids", [])) <= 2 else GROUP_UNITS_SHORT
 
 
 def split_slot(label: str):
@@ -380,11 +385,12 @@ def auto_assign(
     loc_a = loc_names[0] if loc_names else ""
     multi_loc = len(loc_names) >= 2
 
-    group_ids = [eid for eid, e in entities.items() if e["is_group"]]
+    # 短縮の候補になるのは2時間の2人組だけ
+    group_ids = [eid for eid, e in entities.items() if e["is_group"] and group_units(e) == GROUP_UNITS]
 
-    # まずは全グループ2時間で試す
+    # まずは料金表どおりの長さで試す
     lengths = {
-        eid: (GROUP_UNITS if e["is_group"] else INDIVIDUAL_UNITS)
+        eid: (group_units(e) if e["is_group"] else INDIVIDUAL_UNITS)
         for eid, e in entities.items()
     }
     placement, left = _run(entities, lengths, candidates, days, slots_by_day, multi_loc, loc_a, busy)
@@ -393,7 +399,7 @@ def auto_assign(
     def try_with(short_set):
         trial = {
             eid: (
-                (GROUP_UNITS_SHORT if eid in short_set else GROUP_UNITS)
+                (GROUP_UNITS_SHORT if eid in short_set else group_units(e))
                 if e["is_group"]
                 else INDIVIDUAL_UNITS
             )

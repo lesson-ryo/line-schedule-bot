@@ -1115,3 +1115,60 @@ def test_unassigned_people_get_sorry_message(client):
 
     custom = http.get("/kansai/admin/notify?token=kansai-admin&sorry=1&sorry=0&sorry_message=またお願いします").get_data(as_text=True)
     assert "またお願いします" in custom and "2通を送信します" in custom
+
+
+def test_manual_schedule_rows_can_change_time_and_add(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "山田"},
+            {"user_id": "U2", "display_name": "佐藤"},
+            {"user_id": "U3", "display_name": "高橋"},
+        ])
+        storage.save_json("groups", {"U2": ["ペア"], "U3": ["ペア"]})
+        storage.save_json("candidates", ["11/22(土) 10:00", "11/22(土) 11:00"])
+        storage.save_json("votes", [
+            {"user_id": "U1", "display_name": "山田", "candidate_index": 1},
+            {"user_id": "U2", "display_name": "佐藤", "candidate_index": 2},
+        ])
+        storage.save_json("assignment", [
+            {"day": "11/22(土)", "time": "11:00", "end": "13:00", "name": "ペア",
+             "member_ids": ["U2", "U3"], "is_group": True, "location": "吹田教室", "lesson_id": "x"},
+        ])
+
+    data = http.get("/kansai/admin/schedule.json?token=kansai-admin").get_json()
+    ents = {e["name"]: e for e in data["entities"]}
+    assert ents["ペア"]["minutes"] == 120 and ents["山田"]["minutes"] == 60
+    assert data["board"]["slots"][0]["people"][0]["name"] == "山田"
+    assert data["groupMembers"]["ペア"] == ["佐藤", "高橋"]
+
+    r = http.post("/kansai/admin/schedule/save?token=kansai-admin", json={"rows": [
+        {"src": 0, "day": "11/22(土)", "time": "11:00", "end": "12:30", "name": "ペア", "location": "吹田教室", "fee": ""},
+        {"src": None, "day": "11/22(土)", "time": "9:30", "end": "10:30", "name": "山田", "location": "", "fee": "4,500円"},
+    ]})
+    assert r.status_code == 200, r.get_json()
+    sched = r.get_json()["schedule"]
+    assert [(s["time"], s["end"], s["name"]) for s in sched] == [("9:30", "10:30", "山田"), ("11:00", "12:30", "ペア")]
+    assert sched[0]["member_ids"] == ["U1"] and sched[0]["fee"] == "4,500円"
+    assert "lesson_id" not in sched[1]  # 時間を変えたら別レッスン扱い
+
+    bad = http.post("/kansai/admin/schedule/save?token=kansai-admin", json={"rows": [
+        {"src": None, "day": "11/22(土)", "time": "12:00", "end": "11:00", "name": "山田"}]})
+    assert bad.status_code == 400
+
+
+def test_auto_assign_uses_price_table_lengths():
+    import assign
+    cands = [f"11/22(土) {h}:00" for h in range(10, 16)]
+    votes = []
+    for u in ("A", "B", "C"):
+        for i in range(1, 7):
+            votes.append({"user_id": u, "display_name": u, "candidate_index": i})
+    for u in ("D", "E"):
+        for i in range(1, 7):
+            votes.append({"user_id": u, "display_name": u, "candidate_index": i})
+    r = assign.auto_assign(cands, votes, {}, {}, {"A": ["三人"], "B": ["三人"], "C": ["三人"], "D": ["二人"], "E": ["二人"]})
+    lens = {s["name"]: s["length"] for s in r["schedule"]}
+    assert lens["三人"] == 3 and lens["二人"] == 4
