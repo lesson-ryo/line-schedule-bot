@@ -1793,7 +1793,11 @@ def admin_notify():
     """割り当て結果を各自にLINEで通知する。
     確認なしで送らないよう、まずプレビューを表示し &send=1 で実際に送信する。"""
     check_admin_token()
-    from schedule_tools import build_notifications, send_notifications, DEFAULT_NOTIFY_MESSAGE
+    from schedule_tools import (
+        build_notifications, send_notifications, DEFAULT_NOTIFY_MESSAGE,
+        build_unassigned_notification, DEFAULT_SORRY_MESSAGE,
+    )
+    import html as html_lib
 
     schedule = load_json("assignment", default=[])
     if not schedule:
@@ -1806,6 +1810,16 @@ def admin_notify():
     save_json("notify_message", message)
     items = build_notifications(schedule, message)
 
+    # 枠に入らなかった人へのお知らせ（毎回チェックで選ぶ。既定は送る）
+    sorry_on = request.args.get("sorry", "1") == "1"
+    sorry_text = (request.args.get("sorry_message", "") or load_json("sorry_message", default="")
+                  or DEFAULT_SORRY_MESSAGE).strip()
+    if request.args.get("sorry_message"):
+        save_json("sorry_message", sorry_text)
+    sorry_items = build_unassigned_notification(schedule, sorry_text)
+    if sorry_on:
+        items = items + sorry_items
+
     if request.args.get("send") == "1":
         result = send_notifications(items)
         return (
@@ -1816,15 +1830,39 @@ def admin_notify():
     total = sum(len(i["user_ids"]) for i in items)
     preview = [f"{total}通を送信します。内容を確認してください。", ""]
     for i in items:
-        preview.append(f"── {i['name']}（{len(i['user_ids'])}人）")
+        if i.get("names"):
+            preview.append(f"── {i['name']}（{len(i['user_ids'])}人: {'、'.join(i['names'])}）")
+        else:
+            preview.append(f"── {i['name']}（{len(i['user_ids'])}人）")
         preview.append(i["text"])
         preview.append("")
 
     send_url = admin_link(
-        "notify", send="1", message=message or DEFAULT_NOTIFY_MESSAGE
+        "notify", send="1", message=message or DEFAULT_NOTIFY_MESSAGE,
+        sorry="1" if sorry_on else "0", sorry_message=sorry_text,
     )
+    esc = html_lib.escape
+    sorry_box = ""
+    if sorry_items:
+        token = request.args.get("token", "")
+        hidden = f'<input type="hidden" name="token" value="{esc(token)}">' if token else ""
+        sorry_box = (
+            '<form method="get" action="/admin/notify" style="margin:14px 0;padding:12px;border:1px solid #ddd;'
+            'border-radius:8px;max-width:640px">'
+            f'{hidden}<input type="hidden" name="message" value="{esc(message or DEFAULT_NOTIFY_MESSAGE)}">'
+            '<b>枠に入らなかった人へのお知らせ</b>'
+            f'<p style="font-size:13px;color:#666;margin:6px 0">回答したのにレッスンが入らなかった人: '
+            f'{esc("、".join(sorry_items[0]["names"]))}</p>'
+            f'<label><input type="checkbox" name="sorry" value="1"{" checked" if sorry_on else ""}> 一緒に送る</label>'
+            '<input type="hidden" name="sorry" value="0">'
+            f'<textarea name="sorry_message" rows="4" style="display:block;width:100%;margin-top:8px;'
+            f'font-size:14px;box-sizing:border-box">{esc(sorry_text)}</textarea>'
+            '<button style="margin-top:8px">この内容でプレビューを更新</button>'
+            '</form>'
+        )
     return (
-        f"<pre>{chr(10).join(preview)}</pre>"
+        f"<pre>{esc(chr(10).join(preview))}</pre>"
+        f"{sorry_box}"
         f'<p><a href="{send_url}" '
         f"onclick=\"return confirm('{total}通を送信します。よろしいですか？')\">"
         f"この内容で送信する</a>　"

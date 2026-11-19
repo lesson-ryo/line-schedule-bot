@@ -1081,3 +1081,37 @@ def test_teacher_notice_can_be_turned_off(client):
     sent = []
     run_due_automations(lambda u, t: sent.append(u), now=datetime(2026, 11, 19, 10, 5, tzinfo=JST))
     assert sent == []
+
+
+def test_unassigned_people_get_sorry_message(client):
+    http, storage, _ = client
+    from lesson_operations import tenant_scope
+
+    with tenant_scope("kansai"):
+        storage.save_json("members", [
+            {"user_id": "U1", "display_name": "山田"},
+            {"user_id": "U2", "display_name": "佐藤"},
+            {"user_id": "U3", "display_name": "高橋"},
+            {"user_id": "U4", "display_name": "鈴木"},
+        ])
+        storage.save_json("votes", [
+            {"user_id": "U1", "display_name": "山田", "candidate_index": 1},
+            {"user_id": "U2", "display_name": "佐藤", "candidate_index": 1},
+        ])
+        storage.save_json("skips", ["U3"])
+        storage.save_json("candidates", ["2099-08-21 10:00"])
+        storage.save_json("assignment", [
+            {"day": "2099-08-21", "time": "10:00", "end": "11:00", "name": "山田",
+             "member_ids": ["U1"], "is_group": False, "location": ""},
+        ])
+
+    page = http.get("/kansai/admin/notify?token=kansai-admin").get_data(as_text=True)
+    assert "枠に入らなかった人（1人: 佐藤）" in page
+    assert "ご希望の時間でレッスンをお取りできませんでした" in page
+    assert "高橋" not in page and "鈴木" not in page
+
+    off = http.get("/kansai/admin/notify?token=kansai-admin&sorry=0&sorry=0").get_data(as_text=True)
+    assert "1通を送信します" in off
+
+    custom = http.get("/kansai/admin/notify?token=kansai-admin&sorry=1&sorry=0&sorry_message=またお願いします").get_data(as_text=True)
+    assert "またお願いします" in custom and "2通を送信します" in custom

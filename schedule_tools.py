@@ -253,6 +253,38 @@ def build_notifications(schedule: list[dict], message: str = "") -> list[dict]:
     return items
 
 
+DEFAULT_SORRY_MESSAGE = (
+    "今回の日程調整では、ご希望の時間でレッスンをお取りできませんでした。\n"
+    "申し訳ありません。別の日時のご相談は「先生に連絡」からお気軽にどうぞ。"
+)
+
+
+def unassigned_user_ids(schedule: list[dict]) -> list[str]:
+    """回答で時間を選んだのに、どの枠にも入らなかった人（「参加できません」の人は除く）"""
+    placed = {u for slot in schedule for u in slot.get("member_ids", []) if u}
+    skipped = {str(u) for u in load_json("skips", default=[]) or []}
+    out = []
+    for v in load_json("votes", default=[]) or []:
+        user_id = v.get("user_id", "")
+        if user_id and user_id not in placed and user_id not in skipped and user_id not in out:
+            out.append(user_id)
+    return out
+
+
+def build_unassigned_notification(schedule: list[dict], text: str = "") -> list[dict]:
+    """枠に入らなかった人へのお知らせ（1件にまとめる）。対象がいなければ空。"""
+    user_ids = unassigned_user_ids(schedule)
+    if not user_ids:
+        return []
+    names = {m["user_id"]: m.get("display_name", "") for m in load_json("members", default=[])}
+    return [{
+        "name": "枠に入らなかった人",
+        "user_ids": user_ids,
+        "names": [names.get(u, u) for u in user_ids],
+        "text": (text or DEFAULT_SORRY_MESSAGE).strip(),
+    }]
+
+
 def send_notifications(items: list[dict]) -> str:
     """build_notifications() の結果をPush送信する。
     途中で失敗したらそこで止め、どこまで送ったかを返す（重複送信を避けるため）。"""
