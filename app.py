@@ -1287,6 +1287,9 @@ function runAssign() {
     + '&groups=' + encodeURIComponent(gs.join('|'));
 }
 
+function openFocus(idx) {
+  location.href = '/admin/schedule?token=' + encodeURIComponent(TOKEN) + (idx === null ? '' : '&focus=' + idx);
+}
 async function loadSaved() {
   const box = document.getElementById('savedList');
   try {
@@ -1296,14 +1299,15 @@ async function loadSaved() {
     if (!list.length) { box.textContent = 'まだ割り当てがありません。「時間枠を自動で割り当てる」か「割り当てを手動で調整する」から作ってください。'; return; }
     const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     let html = '<table style="width:100%;border-collapse:collapse;font-size:14px;color:#222">', last = '';
-    list.forEach(s => {
+    list.forEach((s, idx) => {
       if (s.day !== last) { html += '<tr><td colspan="4" style="padding:8px 4px 4px;font-weight:600;color:#06783b">' + esc(s.day) + '</td></tr>'; last = s.day; }
-      html += '<tr style="border-top:1px solid #f0f0f0"><td style="padding:5px 4px;white-space:nowrap">' + esc(s.time) + '〜' + esc(s.end) + '</td>'
+      html += '<tr style="border-top:1px solid #f0f0f0;cursor:pointer" title="この枠を調整する" onclick="openFocus(' + idx + ')"><td style="padding:5px 4px;white-space:nowrap">' + esc(s.time) + '〜' + esc(s.end) + '</td>'
         + '<td style="padding:5px 4px">' + esc(s.name) + (s.is_group ? ' <span style="font-size:11px;color:#888">グループ</span>' : '') + '</td>'
         + '<td style="padding:5px 4px;font-size:12px;color:#666">' + esc(s.location || '') + '</td>'
-        + '<td style="padding:5px 4px;font-size:12px;color:#666">' + esc(s.fee || '') + '</td></tr>';
+        + '<td style="padding:5px 4px;font-size:12px;color:#666">' + esc(s.fee || '') + '</td>'
+        + '<td style="padding:5px 4px;font-size:12px;color:#06783b;white-space:nowrap">調整 ›</td></tr>';
     });
-    box.className = ''; box.innerHTML = html + '</table>';
+    box.className = ''; box.innerHTML = html + '</table><div class="muted" style="margin-top:6px">行を押すと、その枠を調整画面で開きます。</div>';
   } catch (e) { box.textContent = '割り当ての読み込みに失敗しました: ' + e; }
 }
 function showSavedNotice() {
@@ -1311,6 +1315,7 @@ function showSavedNotice() {
   if (!q.has('saved')) return;
   const n = document.getElementById('savedNotice');
   n.innerHTML = '<b>✓ 割り当てを保存しました（' + (parseInt(q.get('saved'), 10) || 0) + '件）</b><br>下の内容を確認して、「送信内容を確認する（確定LINE）」から生徒さんへ送ってください。'
+    + '<div style="margin-top:8px"><button class="sub" onclick="openFocus(null)">← 調整画面に戻る</button></div>'
     + (q.get('cal') === 'ng' ? '<br><span style="color:#b33">Googleカレンダーには反映できませんでした。講師ホームから再同期してください。</span>' : '');
   n.style.display = 'block';
   const btn = document.getElementById('notifyBtn');
@@ -1642,6 +1647,7 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
   .lday button { margin-left: auto; }
   .lrow { border: 1px solid #e6e6e6; border-radius: 9px; padding: 9px; margin-bottom: 8px; background: #fff; }
   .lrow.warn { border-color: #f0b400; background: #fffaf0; }
+  .lrow.focus { box-shadow: 0 0 0 3px #06C755; }
   .lrow .r { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .lrow .r + .r { margin-top: 6px; }
   .lrow input, .lrow select { padding: 7px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: #fff; }
@@ -1704,6 +1710,7 @@ SCHEDULE_EDIT_HTML = """<!DOCTYPE html>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 let data = null, rows = [], boardOpen = true;
+const FOCUS = (() => { const v = new URLSearchParams(location.search).get('focus'); return v === null ? null : parseInt(v, 10); })();
 
 function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function toMin(t) { const p = String(t || '').split(':'); return p.length === 2 ? parseInt(p[0], 10) * 60 + parseInt(p[1], 10) : NaN; }
@@ -1777,7 +1784,7 @@ function renderList() {
     }
     const w = warnings.byRow[i] || [];
     const mins = toMin(r.end) - toMin(r.time);
-    html += '<div class="lrow' + (w.length ? ' warn' : '') + '">'
+    html += '<div class="lrow' + (w.length ? ' warn' : '') + (r.src === FOCUS ? ' focus' : '') + '" id="row' + i + '">'
       + '<div class="r">'
       + '<input class="day" list="dayList" value="' + esc(r.day) + '" onchange="setDay(' + i + ',this.value)">'
       + '<input type="time" step="900" value="' + pad(r.time) + '" onchange="setStart(' + i + ',this.value)">'
@@ -1908,6 +1915,10 @@ async function load() {
   data.groupMembers = data.groupMembers || {};
   rows = (data.schedule || []).map((s, i) => ({ src: i, day: s.day, time: s.time, end: s.end, name: s.name || '', location: s.location || '', fee: s.fee || '' }));
   refresh();
+  if (FOCUS !== null) {
+    const el = document.getElementById('row' + FOCUS);
+    if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+  }
 }
 load();
 </script>
